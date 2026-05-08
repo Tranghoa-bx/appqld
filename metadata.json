@@ -1,0 +1,6 @@
+{
+  "name": "SmartGrade THCS - Sổ Điểm Thông Minh",
+  "description": "Ứng dụng quản lý điểm số và thái độ học tập dành cho giáo viên THCS, tích hợp AI Gemini để phân tích học lực.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
