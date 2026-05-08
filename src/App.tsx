@@ -27,7 +27,7 @@ import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
 import { INITIAL_DATA } from './constants';
-import { AppData, SCORE_WEIGHTS, Grade, Student } from './types';
+import { AppData, SCORE_WEIGHTS, Grade, Student, AVAILABLE_YEARS, AVAILABLE_SEMESTERS, DEFAULT_SUBJECTS } from './types';
 import { callGeminiAI, PROMPTS } from './lib/gemini';
 import {
   Chart as ChartJS,
@@ -91,6 +91,24 @@ export default function App() {
     const saved = localStorage.getItem('smartgrade_data');
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (parsed.grades) {
+        let needsMigration = false;
+        const newGrades: any = {};
+        for (const [key, grades] of Object.entries(parsed.grades)) {
+          if (!key.includes('_')) {
+            needsMigration = true;
+            const cls = parsed.classes?.find((c: any) => c.id === key);
+            const subject = cls?.subject || 'Toán';
+            const newKey = `2023-2024_HK1_${subject}_${key}`;
+            newGrades[newKey] = grades;
+          } else {
+            newGrades[key] = grades;
+          }
+        }
+        if (needsMigration) {
+          parsed.grades = newGrades;
+        }
+      }
       return { ...INITIAL_DATA, ...parsed, settings: { ...INITIAL_DATA.settings, ...(parsed.settings || {}) } };
     }
     return INITIAL_DATA;
@@ -101,6 +119,17 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
+
+  const [selectedYear, setSelectedYear] = useState('2023-2024');
+  const [selectedSemester, setSelectedSemester] = useState('HK1');
+  const [selectedSubject, setSelectedSubject] = useState('Toán');
+  const [showRankId, setShowRankId] = useState<string | null>(null);
+
+  const [draftGrades, setDraftGrades] = useState<Record<string, Record<string, string>>>({});
+
+  useEffect(() => {
+    setDraftGrades({});
+  }, [selectedClassId, selectedYear, selectedSemester, selectedSubject]);
 
   useEffect(() => {
     localStorage.setItem('smartgrade_data', JSON.stringify(data));
@@ -122,8 +151,138 @@ export default function App() {
   };
 
   const activeClass = data.classes.find(c => c.id === selectedClassId);
-  const classStudents = data.students[selectedClassId] || [];
-  const classGrades = data.grades[selectedClassId] || [];
+  const classStudents = selectedClassId ? (data.students[selectedClassId] || []) : [];
+  const gradeKey = `${selectedYear}_${selectedSemester}_${selectedSubject}_${selectedClassId}`;
+  
+  // Lazy init grades for rendering
+  const classGrades = classStudents.map(student => {
+    const existing = (data.grades[gradeKey] || []).find(g => g.studentId === student.id);
+    return existing || { studentId: student.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 };
+  });
+
+  const parseGrades = (input: string): number[] => {
+    if (!input.trim()) return [];
+    return input.split(/[, \t]+/)
+      .map(s => parseFloat(s.trim().replace(',', '.')))
+      .filter(n => !isNaN(n) && n >= 0 && n <= 10);
+  };
+
+  const handleSaveDrafts = () => {
+    if (Object.keys(draftGrades).length === 0) return;
+
+    Swal.fire({
+      title: 'Lưu thay đổi?',
+      text: 'Bạn có chắc chắn muốn lưu các điểm vừa nhập?',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Đồng ý lưu',
+      cancelButtonText: 'Hủy'
+    }).then(res => {
+      if (res.isConfirmed) {
+        setData(prev => {
+          const gradesArray = prev.grades[gradeKey] || [];
+          let newGrades = [...gradesArray];
+          let newHistory = [...prev.history];
+          const timestamp = new Date().toISOString();
+
+          Object.entries(draftGrades).forEach(([studentId, edits]) => {
+            let index = newGrades.findIndex(g => g.studentId === studentId);
+            if (index === -1) {
+              newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 });
+              index = newGrades.length - 1;
+            }
+            
+            const currentGrade = { ...newGrades[index] };
+            
+            const processField = (field: keyof Grade, fieldName: string, isArray: boolean) => {
+              if (edits[field] !== undefined) {
+                const oldVal = currentGrade[field];
+                let newVal: any = null;
+                
+                if (isArray) {
+                  newVal = parseGrades(edits[field]);
+                } else {
+                  const num = parseFloat(edits[field].replace(',', '.'));
+                  newVal = (!isNaN(num) && num >= 0 && num <= 10) ? num : null;
+                }
+
+                const oldStr = Array.isArray(oldVal) ? `[${oldVal.join(', ')}]` : oldVal === null ? 'Trống' : oldVal;
+                const newStr = Array.isArray(newVal) ? `[${newVal.join(', ')}]` : newVal === null ? 'Trống' : newVal;
+
+                if (oldStr !== newStr) {
+                  currentGrade[field] = newVal;
+                  newHistory.unshift({
+                    id: Math.random().toString(36).substr(2, 9),
+                    studentId,
+                    timestamp,
+                    type: fieldName as any,
+                    oldValue: String(oldStr),
+                    newValue: String(newStr)
+                  });
+                }
+              }
+            };
+
+            processField('oral', 'Miệng', true);
+            processField('m15', '15 Phút', true);
+            processField('h1', 'Giữa Kỳ', true);
+            processField('semester', 'Cuối Kỳ', false);
+
+            newGrades[index] = currentGrade;
+          });
+
+          return {
+            ...prev,
+            grades: { ...prev.grades, [gradeKey]: newGrades },
+            history: newHistory.slice(0, 1000)
+          };
+        });
+
+        setDraftGrades({});
+        Swal.fire('Thành công', 'Đã lưu điểm thành công!', 'success');
+      }
+    });
+  };
+
+  const normalRanks: Record<string, number> = {};
+  if (selectedSemester !== 'CN') {
+    const sortedNormal = [...classStudents].map(s => {
+      const g = classGrades.find(grade => grade.studentId === s.id);
+      return { id: s.id, avg: g ? calculateAverage(g) : 0 };
+    }).sort((a, b) => b.avg - a.avg);
+    
+    let currentRank = 1;
+    for (let i = 0; i < sortedNormal.length; i++) {
+      if (i > 0 && sortedNormal[i].avg < sortedNormal[i - 1].avg) {
+        currentRank = i + 1;
+      }
+      normalRanks[sortedNormal[i].id] = currentRank;
+    }
+  }
+
+  const cnRanks: Record<string, number> = {};
+  if (selectedSemester === 'CN') {
+    const sortedCn = [...classStudents].map(student => {
+      const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
+      const hk2Key = `${selectedYear}_HK2_${selectedSubject}_${selectedClassId}`;
+      const hk1Grade = (data.grades[hk1Key] || []).find(g => g.studentId === student.id);
+      const hk2Grade = (data.grades[hk2Key] || []).find(g => g.studentId === student.id);
+      
+      const avg1 = hk1Grade ? calculateAverage(hk1Grade) : 0;
+      const avg2 = hk2Grade ? calculateAverage(hk2Grade) : 0;
+      let cnAvg = 0;
+      if (avg1 > 0 || avg2 > 0) cnAvg = Math.round(((avg1 + avg2 * 2) / 3) * 10) / 10;
+      return { id: student.id, cnAvg };
+    }).sort((a, b) => b.cnAvg - a.cnAvg);
+
+    let cnCurrentRank = 1;
+    for (let i = 0; i < sortedCn.length; i++) {
+      if (i > 0 && sortedCn[i].cnAvg < sortedCn[i - 1].cnAvg) {
+        cnCurrentRank = i + 1;
+      }
+      cnRanks[sortedCn[i].id] = cnCurrentRank;
+    }
+  }
 
   const handleUpdateGrade = (studentId: string, field: keyof Grade, value: any) => {
      const grade = classGrades.find(g => g.studentId === studentId);
@@ -140,25 +299,32 @@ export default function App() {
      recordHistory(studentId, fieldMap[field as string] || field, Array.isArray(oldVal) ? `[${oldVal.join(', ')}]` : oldVal === null ? 'Trống' : oldVal, Array.isArray(value) ? `[${value.join(', ')}]` : value);
 
     setData(prev => {
-      const newGrades = [...prev.grades[selectedClassId]];
-      const index = newGrades.findIndex(g => g.studentId === studentId);
+      const gradesArray = prev.grades[gradeKey] || [];
+      const index = gradesArray.findIndex(g => g.studentId === studentId);
+      
+      let newGrades = [...gradesArray];
       if (index !== -1) {
         newGrades[index] = { ...newGrades[index], [field]: value };
+      } else {
+        const newGrade: Grade = { studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0, [field]: value };
+        newGrades.push(newGrade);
       }
       return {
         ...prev,
-        grades: { ...prev.grades, [selectedClassId]: newGrades }
+        grades: { ...prev.grades, [gradeKey]: newGrades }
       };
     });
   };
 
   const updateBonus = (studentId: string, amount: number) => {
     setData(prev => {
-      const newGrades = [...prev.grades[selectedClassId]];
-      const index = newGrades.findIndex(g => g.studentId === studentId);
-      if (index === -1) return prev;
-
-      const oldVal = newGrades[index].bonusTotal || 0;
+      const gradesArray = prev.grades[gradeKey] || [];
+      const index = gradesArray.findIndex(g => g.studentId === studentId);
+      let newGrades = [...gradesArray];
+      
+      let oldVal = 0;
+      if (index !== -1) oldVal = newGrades[index].bonusTotal || 0;
+      
       const newVal = Math.max(0, oldVal + amount);
 
       if (oldVal !== newVal) {
@@ -170,12 +336,16 @@ export default function App() {
           oldValue: String(oldVal),
           newValue: String(newVal)
         };
+        
+        if (index !== -1) {
+          newGrades[index] = { ...newGrades[index], bonusTotal: newVal };
+        } else {
+          newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: newVal, penaltyTotal: 0 });
+        }
+
         return {
           ...prev,
-          grades: { 
-            ...prev.grades, 
-            [selectedClassId]: newGrades.map((g, i) => i === index ? { ...g, bonusTotal: newVal } : g) 
-          },
+          grades: { ...prev.grades, [gradeKey]: newGrades },
           history: [record, ...prev.history].slice(0, 1000)
         };
       }
@@ -185,27 +355,36 @@ export default function App() {
 
   const updatePenalty = (studentId: string, amount: number) => {
     setData(prev => {
-      const newGrades = [...prev.grades[selectedClassId]];
-      const index = newGrades.findIndex(g => g.studentId === studentId);
-      if (index !== -1) {
-        const oldVal = newGrades[index].penaltyTotal || 0;
-        const newVal = Math.max(0, oldVal + amount);
+      const gradesArray = prev.grades[gradeKey] || [];
+      const index = gradesArray.findIndex(g => g.studentId === studentId);
+      let newGrades = [...gradesArray];
+      
+      let oldVal = 0;
+      if (index !== -1) oldVal = newGrades[index].penaltyTotal || 0;
+      
+      const newVal = Math.max(0, oldVal + amount);
 
-        if (oldVal !== newVal) {
-          const record = {
-            id: Math.random().toString(36).substr(2, 9),
-            studentId,
-            timestamp: new Date().toISOString(),
-            type: 'Trừ',
-            oldValue: String(oldVal),
-            newValue: String(newVal)
-          };
-          return {
-            ...prev,
-            grades: { ...prev.grades, [selectedClassId]: newGrades.map((g, i) => i === index ? { ...g, penaltyTotal: newVal } : g) },
-            history: [record, ...prev.history].slice(0, 1000)
-          };
+      if (oldVal !== newVal) {
+        const record = {
+          id: Math.random().toString(36).substr(2, 9),
+          studentId,
+          timestamp: new Date().toISOString(),
+          type: 'Trừ' as const,
+          oldValue: String(oldVal),
+          newValue: String(newVal)
+        };
+        
+        if (index !== -1) {
+          newGrades[index] = { ...newGrades[index], penaltyTotal: newVal };
+        } else {
+          newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: newVal });
         }
+
+        return {
+          ...prev,
+          grades: { ...prev.grades, [gradeKey]: newGrades },
+          history: [record, ...prev.history].slice(0, 1000)
+        };
       }
       return prev;
     });
@@ -213,25 +392,53 @@ export default function App() {
 
   const exportExcel = () => {
     if (!activeClass) return;
-    const exportData = classStudents.map(s => {
-      const g = classGrades.find(grade => grade.studentId === s.id);
-      const avg = g ? calculateAverage(g) : 0;
-      const latestMonthly = g?.monthlyHistory && g.monthlyHistory.length > 0 ? g.monthlyHistory[g.monthlyHistory.length - 1] : null;
+    
+    let exportData: any[] = [];
+    if (selectedSemester === 'CN') {
+      const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
+      const hk2Key = `${selectedYear}_HK2_${selectedSubject}_${selectedClassId}`;
       
-      return {
-        'Họ và Tên': s.name,
-        'Giới tính': s.gender,
-        'Điểm Miệng': g?.oral.join(', ') || '',
-        'Điểm 15 Phút': g?.m15.join(', ') || '',
-        'Điểm Giữa Kỳ': g?.h1.join(', ') || '',
-        'Điểm Cuối Kỳ': g?.semester !== null && g?.semester !== undefined ? g.semester : '',
-        'Đ. Cộng (+)': g?.bonusTotal || 0,
-        'Đ. Trừ (-)': g?.penaltyTotal || 0,
-        'ĐTB': avg,
-        'Xếp loại': getRank(avg).label,
-        'Nhận xét AI': latestMonthly ? latestMonthly.suggestion : ''
-      };
-    });
+      exportData = classStudents.map(s => {
+        const hk1Grade = (data.grades[hk1Key] || []).find(g => g.studentId === s.id);
+        const hk2Grade = (data.grades[hk2Key] || []).find(g => g.studentId === s.id);
+        
+        const avg1 = hk1Grade ? calculateAverage(hk1Grade) : 0;
+        const avg2 = hk2Grade ? calculateAverage(hk2Grade) : 0;
+        
+        let cnAvg = 0;
+        if (avg1 > 0 || avg2 > 0) cnAvg = Math.round(((avg1 + avg2 * 2) / 3) * 10) / 10;
+        const rank = getRank(cnAvg);
+        
+        return {
+          'Họ và Tên': s.name,
+          'Giới tính': s.gender,
+          'ĐTB HK I': avg1 || '',
+          'ĐTB HK II': avg2 || '',
+          'ĐTB Cả năm': cnAvg || '',
+          'Xếp loại': cnAvg > 0 ? rank.label : ''
+        };
+      });
+    } else {
+      exportData = classStudents.map(s => {
+        const g = classGrades.find(grade => grade.studentId === s.id);
+        const avg = g ? calculateAverage(g) : 0;
+        const latestMonthly = g?.monthlyHistory && g.monthlyHistory.length > 0 ? g.monthlyHistory[g.monthlyHistory.length - 1] : null;
+        
+        return {
+          'Họ và Tên': s.name,
+          'Giới tính': s.gender,
+          'Điểm Miệng': g?.oral.join(', ') || '',
+          'Điểm 15 Phút': g?.m15.join(', ') || '',
+          'Điểm Giữa Kỳ': g?.h1.join(', ') || '',
+          'Điểm Cuối Kỳ': g?.semester !== null && g?.semester !== undefined ? g.semester : '',
+          'Đ. Cộng (+)': g?.bonusTotal || 0,
+          'Đ. Trừ (-)': g?.penaltyTotal || 0,
+          'ĐTB': avg,
+          'Xếp loại': getRank(avg).label,
+          'Nhận xét AI': latestMonthly ? latestMonthly.suggestion : ''
+        };
+      });
+    }
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -271,18 +478,15 @@ export default function App() {
         if (lines.length === 0) return;
 
         const newStudents: Student[] = [];
-        const newGrades: Grade[] = [];
 
         lines.forEach((name: string, index: number) => {
           const studentId = `s_${Date.now()}_${index}`;
           newStudents.push({ id: studentId, name, gender: 'Nam' });
-          newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 });
         });
 
         setData(prev => ({
           ...prev,
-          students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), ...newStudents] },
-          grades: { ...prev.grades, [selectedClassId]: [...(prev.grades[selectedClassId] || []), ...newGrades] }
+          students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), ...newStudents] }
         }));
         Swal.fire('Thành công', `Đã thêm ${newStudents.length} học sinh!`, 'success');
       }
@@ -326,7 +530,8 @@ export default function App() {
         const timestamp = dayjs().toISOString();
         
         setData(prev => {
-          const newGrades = prev.grades[selectedClassId].map(grade => {
+          const gradesArray = prev.grades[gradeKey] || [];
+          const newGrades = gradesArray.map(grade => {
             const net = (grade.bonusTotal || 0) - (grade.penaltyTotal || 0);
             let suggestion = 'Bình thường';
             if (net >= 2) suggestion = 'Tuyên dương';
@@ -353,18 +558,19 @@ export default function App() {
           
           return {
             ...prev,
-            grades: { ...prev.grades, [selectedClassId]: newGrades }
+            grades: { ...prev.grades, [gradeKey]: newGrades }
           };
         });
         Swal.fire('Thành công', 'Đã chốt kỳ và lưu lịch sử!', 'success');
       } else if (result.isDenied) {
         setData(prev => {
-          const newGrades = prev.grades[selectedClassId].map(grade => ({
+          const gradesArray = prev.grades[gradeKey] || [];
+          const newGrades = gradesArray.map(grade => ({
             ...grade,
             bonusTotal: 0,
             penaltyTotal: 0
           }));
-          return { ...prev, grades: { ...prev.grades, [selectedClassId]: newGrades } };
+          return { ...prev, grades: { ...prev.grades, [gradeKey]: newGrades } };
         });
         Swal.fire('Đã xóa', 'Dữ liệu nháp đã được reset về 0.', 'info');
       }
@@ -695,6 +901,12 @@ export default function App() {
             </div>
             {activeTab === 'grading' && (
               <>
+                {Object.keys(draftGrades).length > 0 && (
+                  <button onClick={handleSaveDrafts} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md animate-pulse">
+                    <Save size={18} />
+                    <span className="hidden sm:inline">Lưu điểm</span>
+                  </button>
+                )}
                 <button onClick={handleCloseMonth} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
                   <CalendarCheck size={18} />
                   <span className="hidden sm:inline">Chốt kỳ</span>
@@ -721,6 +933,42 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-6"
             >
+              {/* Context Selectors */}
+              <div className="flex flex-wrap gap-3 bg-white p-4 rounded-2xl border border-slate-200 card-shadow items-center">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-semibold text-slate-600">Năm học:</label>
+                  <select 
+                    value={selectedYear} 
+                    onChange={e => setSelectedYear(e.target.value)}
+                    className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    {AVAILABLE_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+                
+                <div className="flex items-center gap-2 ml-4">
+                  <label className="text-sm font-semibold text-slate-600">Học kỳ:</label>
+                  <select 
+                    value={selectedSemester} 
+                    onChange={e => setSelectedSemester(e.target.value)}
+                    className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    {AVAILABLE_SEMESTERS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 ml-4">
+                  <label className="text-sm font-semibold text-slate-600">Môn học:</label>
+                  <select 
+                    value={selectedSubject} 
+                    onChange={e => setSelectedSubject(e.target.value)}
+                    className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    {DEFAULT_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
               {/* Quick Filters/Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white p-4 rounded-2xl border border-slate-100 card-shadow">
@@ -744,6 +992,71 @@ export default function App() {
               {/* Table Container */}
               <div className="bg-white rounded-2xl border border-slate-200 card-shadow overflow-hidden">
                 <div className="overflow-x-auto">
+                  {selectedSemester === 'CN' ? (
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50/80 border-b border-slate-200">
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">ĐTB Học kỳ I</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">ĐTB Học kỳ II</th>
+                          <th className="px-6 py-4 text-xs font-bold text-blue-600 uppercase text-center bg-blue-50/30">ĐTB Cả năm</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Hạng</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Xếp loại</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {classStudents.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase())).map((student) => {
+                          const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
+                          const hk2Key = `${selectedYear}_HK2_${selectedSubject}_${selectedClassId}`;
+                          const hk1Grade = (data.grades[hk1Key] || []).find(g => g.studentId === student.id);
+                          const hk2Grade = (data.grades[hk2Key] || []).find(g => g.studentId === student.id);
+                          
+                          const avg1 = hk1Grade ? calculateAverage(hk1Grade) : 0;
+                          const avg2 = hk2Grade ? calculateAverage(hk2Grade) : 0;
+                          
+                          let cnAvg = 0;
+                          if (avg1 > 0 || avg2 > 0) cnAvg = Math.round(((avg1 + avg2 * 2) / 3) * 10) / 10;
+                          const rank = getRank(cnAvg);
+
+                          return (
+                            <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${student.gender === 'Nam' ? 'bg-blue-400' : 'bg-rose-400'}`}>
+                                    {student.name.charAt(0)}
+                                  </div>
+                                  <div className="leading-none group">
+                                    <p 
+                                      className="font-bold text-slate-900 group-hover:text-blue-600 flex items-center gap-1 cursor-pointer"
+                                      onClick={() => setShowRankId(showRankId === student.id ? null : student.id)}
+                                    >
+                                      {student.name}
+                                    </p>
+                                    {showRankId === student.id && cnAvg > 0 && (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider mt-1 inline-block ${rank.bg} ${rank.color}`}>
+                                        {rank.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-center font-semibold text-slate-600">{avg1 > 0 ? avg1 : '-'}</td>
+                              <td className="px-6 py-4 text-center font-semibold text-slate-600">{avg2 > 0 ? avg2 : '-'}</td>
+                              <td className="px-6 py-4 text-center font-bold text-blue-600 bg-blue-50/30 text-lg">{cnAvg > 0 ? cnAvg : '-'}</td>
+                              <td className="px-6 py-4 text-center font-bold text-amber-600 text-lg">{cnAvg > 0 ? cnRanks[student.id] : '-'}</td>
+                              <td className="px-6 py-4 text-center">
+                                {cnAvg > 0 ? (
+                                  <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${rank.bg} ${rank.color}`}>
+                                    {rank.label}
+                                  </span>
+                                ) : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/80 border-b border-slate-200">
@@ -756,6 +1069,7 @@ export default function App() {
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Hạng</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -773,111 +1087,96 @@ export default function App() {
                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${student.gender === 'Nam' ? 'bg-blue-400' : 'bg-rose-400'}`}>
                                   {student.name.charAt(0)}
                                 </div>
-                                <div className="leading-none cursor-pointer group" onClick={() => {
-                                  Swal.fire({
-                                    title: 'Sửa thông tin học sinh',
-                                    html: `
-                                      <input id="swal-student-name" class="swal2-input" value="${student.name}" placeholder="Tên học sinh">
-                                      <select id="swal-student-gender" class="swal2-select">
-                                        <option value="Nam" ${student.gender === 'Nam' ? 'selected' : ''}>Nam</option>
-                                        <option value="Nữ" ${student.gender === 'Nữ' ? 'selected' : ''}>Nữ</option>
-                                      </select>
-                                    `,
-                                    showCancelButton: true,
-                                    confirmButtonText: 'Lưu',
-                                    cancelButtonText: 'Hủy',
-                                    preConfirm: () => {
-                                      const name = (document.getElementById('swal-student-name') as HTMLInputElement).value;
-                                      const gender = (document.getElementById('swal-student-gender') as HTMLSelectElement).value as 'Nam' | 'Nữ';
-                                      if (!name) Swal.showValidationMessage('Vui lòng nhập tên học sinh');
-                                      return { name, gender };
-                                    }
-                                  }).then((res) => {
-                                    if (res.isConfirmed) {
-                                      setData(prev => {
-                                        const newStudents = [...(prev.students[selectedClassId] || [])];
-                                        const idx = newStudents.findIndex(s => s.id === student.id);
-                                        if (idx !== -1) newStudents[idx] = { ...newStudents[idx], name: res.value.name, gender: res.value.gender };
-                                        return { ...prev, students: { ...prev.students, [selectedClassId]: newStudents } };
-                                      });
-                                    }
-                                  });
-                                }}>
-                                  <p className="font-bold text-slate-900 group-hover:text-blue-600 flex items-center gap-1">
-                                    {student.name} <SettingsIcon size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                                  </p>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider mt-1 inline-block ${rank.bg} ${rank.color}`}>
-                                    {rank.label}
-                                  </span>
+                                <div className="leading-none group">
+                                  <div className="flex items-center gap-2">
+                                    <p 
+                                      className="font-bold text-slate-900 group-hover:text-blue-600 cursor-pointer"
+                                      onClick={() => setShowRankId(showRankId === student.id ? null : student.id)}
+                                      title="Nhấn để xem xếp loại"
+                                    >
+                                      {student.name}
+                                    </p>
+                                    <button 
+                                      className="text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        Swal.fire({
+                                          title: 'Sửa thông tin học sinh',
+                                          html: `
+                                            <input id="swal-student-name" class="swal2-input" value="${student.name}" placeholder="Tên học sinh">
+                                            <select id="swal-student-gender" class="swal2-select">
+                                              <option value="Nam" ${student.gender === 'Nam' ? 'selected' : ''}>Nam</option>
+                                              <option value="Nữ" ${student.gender === 'Nữ' ? 'selected' : ''}>Nữ</option>
+                                            </select>
+                                          `,
+                                          showCancelButton: true,
+                                          confirmButtonText: 'Lưu',
+                                          cancelButtonText: 'Hủy',
+                                          preConfirm: () => {
+                                            const name = (document.getElementById('swal-student-name') as HTMLInputElement).value;
+                                            const gender = (document.getElementById('swal-student-gender') as HTMLSelectElement).value as 'Nam' | 'Nữ';
+                                            if (!name) Swal.showValidationMessage('Vui lòng nhập tên học sinh');
+                                            return { name, gender };
+                                          }
+                                        }).then((res) => {
+                                          if (res.isConfirmed) {
+                                            setData(prev => {
+                                              const newStudents = [...(prev.students[selectedClassId] || [])];
+                                              const idx = newStudents.findIndex(s => s.id === student.id);
+                                              if (idx !== -1) newStudents[idx] = { ...newStudents[idx], name: res.value.name, gender: res.value.gender };
+                                              return { ...prev, students: { ...prev.students, [selectedClassId]: newStudents } };
+                                            });
+                                          }
+                                        });
+                                      }}
+                                      title="Sửa thông tin"
+                                    >
+                                      <SettingsIcon size={14} />
+                                    </button>
+                                  </div>
+                                  {showRankId === student.id && (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider mt-1 inline-block ${rank.bg} ${rank.color}`}>
+                                      {rank.label}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </td>
                             {/* Điểm Miệng */}
                             <td className="px-6 py-4 text-center">
-                              <div className="flex flex-wrap justify-center gap-1 min-w-[80px]">
-                                {grade.oral.map((s, idx) => (
-                                  <button 
-                                    key={idx} 
-                                    onClick={() => openScoreEditModal(student, 'oral', 'Miệng', s, idx)}
-                                    className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-bold border border-slate-200 hover:bg-white hover:shadow-sm transition-all"
-                                  >
-                                    {s}
-                                  </button>
-                                ))}
-                                <button 
-                                  onClick={() => openScoreEditModal(student, 'oral', 'Miệng', null)}
-                                  className="text-blue-500 hover:text-blue-700"
-                                >
-                                  <PlusCircle size={14} />
-                                </button>
-                              </div>
+                              <input 
+                                type="text"
+                                value={draftGrades[student.id]?.oral !== undefined ? draftGrades[student.id].oral : grade.oral.join(' ')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), oral: e.target.value } }))}
+                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.oral !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                              />
                             </td>
                             {/* Điểm 15P */}
                             <td className="px-6 py-4 text-center">
-                              <div className="flex flex-wrap justify-center gap-1 min-w-[80px]">
-                                {grade.m15.map((s, idx) => (
-                                  <button 
-                                    key={idx} 
-                                    onClick={() => openScoreEditModal(student, 'm15', '15 Phút', s, idx)}
-                                    className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-bold border border-slate-200 hover:bg-white hover:shadow-sm transition-all"
-                                  >
-                                    {s}
-                                  </button>
-                                ))}
-                                <button className="text-blue-500 hover:text-blue-700"
-                                   onClick={() => openScoreEditModal(student, 'm15', '15 Phút', null)}
-                                >
-                                  <PlusCircle size={14} />
-                                </button>
-                              </div>
+                              <input 
+                                type="text"
+                                value={draftGrades[student.id]?.m15 !== undefined ? draftGrades[student.id].m15 : grade.m15.join(' ')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), m15: e.target.value } }))}
+                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.m15 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                              />
                             </td>
                             {/* Giữa kỳ */}
                             <td className="px-6 py-4 text-center">
-                              <div className="flex flex-wrap justify-center gap-1 min-w-[80px]">
-                                {grade.h1.map((s, idx) => (
-                                  <button 
-                                    key={idx} 
-                                    onClick={() => openScoreEditModal(student, 'h1', 'Giữa Kỳ', s, idx)}
-                                    className="bg-indigo-50 px-1.5 py-0.5 rounded text-xs font-bold border border-indigo-200 text-indigo-700 hover:bg-white transition-all shadow-sm"
-                                  >
-                                    {s}
-                                  </button>
-                                ))}
-                                <button className="text-indigo-500"
-                                  onClick={() => openScoreEditModal(student, 'h1', 'Giữa Kỳ', null)}
-                                >
-                                  <PlusCircle size={14} />
-                                </button>
-                              </div>
+                              <input 
+                                type="text"
+                                value={draftGrades[student.id]?.h1 !== undefined ? draftGrades[student.id].h1 : grade.h1.join(' ')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), h1: e.target.value } }))}
+                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-indigo-200 focus:border-indigo-500 text-indigo-700 hover:border-indigo-300'}`}
+                              />
                             </td>
                             {/* Cuối Kỳ */}
                             <td className="px-6 py-4 text-center">
-                               <button 
-                                  onClick={() => openScoreEditModal(student, 'semester', 'Cuối Kỳ', grade.semester)}
-                                  className={`px-3 py-1 rounded-lg border font-bold text-xs transition-all ${grade.semester !== null ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
-                                >
-                                  {grade.semester !== null ? grade.semester : 'Chưa nhập'}
-                                </button>
+                              <input 
+                                type="text"
+                                value={draftGrades[student.id]?.semester !== undefined ? draftGrades[student.id].semester : (grade.semester !== null ? grade.semester : '')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), semester: e.target.value } }))}
+                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.semester !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-purple-200 focus:border-purple-500 text-purple-700 hover:border-purple-300'}`}
+                              />
                             </td>
                             {/* Điểm Cộng */}
                             <td className="px-6 py-4 text-center bg-emerald-50/10">
@@ -917,6 +1216,12 @@ export default function App() {
                             <td className="px-6 py-4 text-center bg-blue-50/20">
                               <span className={`text-lg font-black ${rank.color}`}>
                                 {avg || '0'}
+                              </span>
+                            </td>
+                            {/* Hạng */}
+                            <td className="px-6 py-4 text-center">
+                              <span className="font-bold text-amber-600 text-lg">
+                                {avg > 0 ? normalRanks[student.id] : '-'}
                               </span>
                             </td>
                             {/* Action */}
@@ -1301,10 +1606,19 @@ export default function App() {
                   <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
                     <div className="flex items-center gap-2 mb-2">
                       <BrainCircuit className="text-blue-500" size={20} />
-                      <h4 className="font-bold text-slate-900">Cấu hình Gemini AI</h4>
+                      <h4 className="font-bold text-slate-900">Thông tin & API</h4>
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-1">API Key</label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">Tên giáo viên (Hiển thị trên báo cáo)</label>
+                      <input 
+                        type="text" 
+                        placeholder="VD: Nguyễn Văn A..."
+                        value={data.settings.teacherName || ''}
+                        onChange={(e) => setData(prev => ({ ...prev, settings: { ...prev.settings, teacherName: e.target.value } }))}
+                        className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+                      />
+
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">API Key Gemini</label>
                       <input 
                         type="password" 
                         placeholder="Nhập Gemini API Key của bạn..."
