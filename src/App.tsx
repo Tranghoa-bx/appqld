@@ -415,7 +415,9 @@ export default function App() {
           'ĐTB HK I': avg1 || '',
           'ĐTB HK II': avg2 || '',
           'ĐTB Cả năm': cnAvg || '',
-          'Xếp loại': cnAvg > 0 ? rank.label : ''
+          'Hạng': cnAvg > 0 ? cnRanks[s.id] : '',
+          'Xếp loại': cnAvg > 0 ? rank.label : '',
+          'Giáo viên': data.settings.teacherName || ''
         };
       });
     } else {
@@ -434,8 +436,10 @@ export default function App() {
           'Đ. Cộng (+)': g?.bonusTotal || 0,
           'Đ. Trừ (-)': g?.penaltyTotal || 0,
           'ĐTB': avg,
+          'Hạng': avg > 0 ? normalRanks[s.id] : '',
           'Xếp loại': getRank(avg).label,
-          'Nhận xét AI': latestMonthly ? latestMonthly.suggestion : ''
+          'Nhận xét AI': latestMonthly ? latestMonthly.suggestion : '',
+          'Giáo viên': data.settings.teacherName || ''
         };
       });
     }
@@ -876,7 +880,7 @@ export default function App() {
             <h2 className="text-2xl font-bold text-slate-900">
               {activeTab === 'dashboard' ? 'Báo cáo tổng quan' : activeTab === 'grading' ? `Sổ điểm: ${activeClass?.name}` : activeTab === 'history' ? 'Lịch sử thay đổi' : 'Cài đặt'}
             </h2>
-            <p className="text-slate-500 text-sm">Chào mừng, giáo viên! Hôm nay là {dayjs().format('DD/MM/YYYY')}</p>
+            <p className="text-slate-500 text-sm">Chào mừng, {data.settings.teacherName ? `giáo viên ${data.settings.teacherName}` : 'giáo viên'}! Hôm nay là {dayjs().format('DD/MM/YYYY')}</p>
           </div>
           
           <div className="flex items-center gap-3">
