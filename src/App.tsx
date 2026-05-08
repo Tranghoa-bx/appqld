@@ -203,14 +203,13 @@ export default function App() {
   const availableYears = data.settings.schoolYears || DEFAULT_YEARS;
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'grading' | 'settings' | 'history'>('dashboard');
-  const [selectedClassId, setSelectedClassId] = useState<string>(data.classes[0]?.id || '');
+  const [selectedYear, setSelectedYear] = useState(data.settings.lastYear || availableYears[availableYears.length - 1]);
+  const [selectedSemester, setSelectedSemester] = useState(data.settings.lastSemester || 'HK1');
+  const [selectedSubject, setSelectedSubject] = useState(data.settings.lastSubject || 'Toán');
+  const [selectedClassId, setSelectedClassId] = useState<string>(data.settings.lastClassId || data.classes[0]?.id || '');
   const [searchQuery, setSearchQuery] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
-
-  const [selectedYear, setSelectedYear] = useState(availableYears[availableYears.length - 1]);
-  const [selectedSemester, setSelectedSemester] = useState('HK1');
-  const [selectedSubject, setSelectedSubject] = useState('Toán');
   const [showRankId, setShowRankId] = useState<string | null>(null);
 
   const [draftGrades, setDraftGrades] = useState<Record<string, Record<string, string>>>({});
@@ -237,7 +236,7 @@ export default function App() {
     };
     setData(prev => ({
       ...prev,
-      history: [record, ...prev.history].slice(0, 1000)
+      history: [record, ...prev.history].slice(0, 5000)
     }));
   };
 
@@ -340,6 +339,24 @@ export default function App() {
             processField('h1', 'Giữa Kỳ', true);
             processField('semester', 'Cuối Kỳ', false);
 
+            // Handle Bonus/Penalty
+            if (edits.bonusTotal !== undefined) {
+              const oldVal = currentGrade.bonusTotal || 0;
+              const newVal = parseFloat(edits.bonusTotal);
+              if (oldVal !== newVal) {
+                currentGrade.bonusTotal = newVal;
+                newHistory.unshift({ id: Math.random().toString(36).substr(2,9), studentId, timestamp, type: 'Cộng' as any, oldValue: String(oldVal), newValue: String(newVal) });
+              }
+            }
+            if (edits.penaltyTotal !== undefined) {
+              const oldVal = currentGrade.penaltyTotal || 0;
+              const newVal = parseFloat(edits.penaltyTotal);
+              if (oldVal !== newVal) {
+                currentGrade.penaltyTotal = newVal;
+                newHistory.unshift({ id: Math.random().toString(36).substr(2,9), studentId, timestamp, type: 'Trừ' as any, oldValue: String(oldVal), newValue: String(newVal) });
+              }
+            }
+
             newGrades[index] = currentGrade;
           });
 
@@ -396,109 +413,45 @@ export default function App() {
     }
   }
 
-  const handleUpdateGrade = (studentId: string, field: keyof Grade, value: any) => {
-     const grade = classGrades.find(g => g.studentId === studentId);
-     if (!grade) return;
-
-     const fieldMap: Record<string, any> = {
-       oral: 'Miệng',
-       m15: '15 Phút',
-       h1: 'Giữa Kỳ',
-       semester: 'Cuối Kỳ'
-     };
-
-     const oldVal = grade[field];
-     recordHistory(studentId, fieldMap[field as string] || field, Array.isArray(oldVal) ? `[${oldVal.join(', ')}]` : oldVal === null ? 'Trống' : oldVal, Array.isArray(value) ? `[${value.join(', ')}]` : value);
-
+   const handleUpdateGrade = (studentId: string, field: keyof Grade, value: any) => {
     setData(prev => {
       const gradesArray = prev.grades[gradeKey] || [];
       const index = gradesArray.findIndex(g => g.studentId === studentId);
-      
       let newGrades = [...gradesArray];
       if (index !== -1) {
         newGrades[index] = { ...newGrades[index], [field]: value };
       } else {
-        const newGrade: Grade = { studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0, [field]: value };
-        newGrades.push(newGrade);
+        newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0, [field]: value });
       }
-      return {
-        ...prev,
-        grades: { ...prev.grades, [gradeKey]: newGrades }
-      };
+      return { ...prev, grades: { ...prev.grades, [gradeKey]: newGrades } };
     });
   };
 
   const updateBonus = (studentId: string, amount: number) => {
-    setData(prev => {
-      const gradesArray = prev.grades[gradeKey] || [];
-      const index = gradesArray.findIndex(g => g.studentId === studentId);
-      let newGrades = [...gradesArray];
-      
-      let oldVal = 0;
-      if (index !== -1) oldVal = newGrades[index].bonusTotal || 0;
-      
-      const newVal = Math.max(0, oldVal + amount);
-
-      if (oldVal !== newVal) {
-        const record = {
-          id: Math.random().toString(36).substr(2, 9),
-          studentId,
-          timestamp: new Date().toISOString(),
-          type: 'Cộng' as const,
-          oldValue: String(oldVal),
-          newValue: String(newVal)
-        };
-        
-        if (index !== -1) {
-          newGrades[index] = { ...newGrades[index], bonusTotal: newVal };
-        } else {
-          newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: newVal, penaltyTotal: 0 });
-        }
-
-        return {
-          ...prev,
-          grades: { ...prev.grades, [gradeKey]: newGrades },
-          history: [record, ...prev.history].slice(0, 1000)
-        };
-      }
-      return prev;
+    setDraftGrades(prev => {
+      const edits = prev[studentId] || {};
+      const grade = classGrades.find(g => g.studentId === studentId);
+      const baseVal = grade?.bonusTotal || 0;
+      const currentDraftVal = edits.bonusTotal !== undefined ? parseFloat(edits.bonusTotal) : baseVal;
+      const newVal = Math.max(0, currentDraftVal + amount);
+      return {
+        ...prev,
+        [studentId]: { ...edits, bonusTotal: String(newVal) }
+      };
     });
   };
 
   const updatePenalty = (studentId: string, amount: number) => {
-    setData(prev => {
-      const gradesArray = prev.grades[gradeKey] || [];
-      const index = gradesArray.findIndex(g => g.studentId === studentId);
-      let newGrades = [...gradesArray];
-      
-      let oldVal = 0;
-      if (index !== -1) oldVal = newGrades[index].penaltyTotal || 0;
-      
-      const newVal = Math.max(0, oldVal + amount);
-
-      if (oldVal !== newVal) {
-        const record = {
-          id: Math.random().toString(36).substr(2, 9),
-          studentId,
-          timestamp: new Date().toISOString(),
-          type: 'Trừ' as const,
-          oldValue: String(oldVal),
-          newValue: String(newVal)
-        };
-        
-        if (index !== -1) {
-          newGrades[index] = { ...newGrades[index], penaltyTotal: newVal };
-        } else {
-          newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: newVal });
-        }
-
-        return {
-          ...prev,
-          grades: { ...prev.grades, [gradeKey]: newGrades },
-          history: [record, ...prev.history].slice(0, 1000)
-        };
-      }
-      return prev;
+    setDraftGrades(prev => {
+      const edits = prev[studentId] || {};
+      const grade = classGrades.find(g => g.studentId === studentId);
+      const baseVal = grade?.penaltyTotal || 0;
+      const currentDraftVal = edits.penaltyTotal !== undefined ? parseFloat(edits.penaltyTotal) : baseVal;
+      const newVal = Math.max(0, currentDraftVal + amount);
+      return {
+        ...prev,
+        [studentId]: { ...edits, penaltyTotal: String(newVal) }
+      };
     });
   };
 
@@ -525,7 +478,7 @@ export default function App() {
         </div>
     `;
 
-    const sections = classStudents.map(s => {
+    const sections = classStudents.map((s, idx) => {
       const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
       const cleanedAnalysis = stripAiSpecialChars(g?.aiAnalysis || "Chưa có dữ liệu phân tích AI cho học sinh này.");
       // In đậm các mục số 1., 2., 3.
@@ -1068,7 +1021,11 @@ export default function App() {
               {data.classes.map(cls => (
                 <div key={cls.id} className="relative group">
                   <button
-                    onClick={() => { setSelectedClassId(cls.id); setActiveTab('grading'); }}
+                    onClick={() => { 
+                      setSelectedClassId(cls.id); 
+                      setActiveTab('grading');
+                      setData(prev => ({ ...prev, settings: { ...prev.settings, lastClassId: cls.id } }));
+                    }}
                     className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm transition-all pr-8 ${selectedClassId === cls.id ? 'bg-slate-100 text-slate-900 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}
                   >
                     <div className="flex items-center gap-2">
@@ -1228,7 +1185,11 @@ export default function App() {
                   <label className="text-sm font-semibold text-slate-600">Năm học:</label>
                   <select 
                     value={selectedYear} 
-                    onChange={e => setSelectedYear(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setSelectedYear(val);
+                      setData(prev => ({ ...prev, settings: { ...prev.settings, lastYear: val } }));
+                    }}
                     className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
                     {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -1239,7 +1200,11 @@ export default function App() {
                   <label className="text-sm font-semibold text-slate-600">Học kỳ:</label>
                   <select 
                     value={selectedSemester} 
-                    onChange={e => setSelectedSemester(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setSelectedSemester(val);
+                      setData(prev => ({ ...prev, settings: { ...prev.settings, lastSemester: val } }));
+                    }}
                     className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
                     {AVAILABLE_SEMESTERS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -1250,7 +1215,11 @@ export default function App() {
                   <label className="text-sm font-semibold text-slate-600">Môn học:</label>
                   <select 
                     value={selectedSubject} 
-                    onChange={e => setSelectedSubject(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setSelectedSubject(val);
+                      setData(prev => ({ ...prev, settings: { ...prev.settings, lastSubject: val } }));
+                    }}
                     className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
                     {DEFAULT_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1366,9 +1335,17 @@ export default function App() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {classStudents.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase())).map((student) => {
-                        const grade = classGrades.find(g => g.studentId === student.id);
-                        if (!grade) return null;
-                        const avg = calculateAverage(grade);
+                        const grade = classGrades.find(g => g.studentId === student.id) || { studentId: student.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 };
+                        const edits = draftGrades[student.id] || {};
+                        
+                        // Merge edits for display
+                        const displayGrade = {
+                          ...grade,
+                          bonusTotal: edits.bonusTotal !== undefined ? parseFloat(edits.bonusTotal) : grade.bonusTotal,
+                          penaltyTotal: edits.penaltyTotal !== undefined ? parseFloat(edits.penaltyTotal) : grade.penaltyTotal,
+                        };
+
+                        const avg = calculateAverage(displayGrade);
                         const rank = getRank(avg);
 
                         return (
@@ -1479,22 +1456,9 @@ export default function App() {
                                 type="text"
                                 value={draftGrades[student.id]?.h1 !== undefined ? draftGrades[student.id].h1 : grade.h1.join(' ')}
                                 onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), h1: e.target.value } }))}
-                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-indigo-200 focus:border-indigo-500 text-indigo-700 hover:border-indigo-300'}`}
-                              />
-                            </td>
-                            {/* Cuối Kỳ */}
-                            <td className="px-6 py-4 text-center">
-                              <input 
-                                type="text"
-                                value={draftGrades[student.id]?.semester !== undefined ? draftGrades[student.id].semester : (grade.semester !== null ? grade.semester : '')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), semester: e.target.value } }))}
-                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.semester !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-purple-200 focus:border-purple-500 text-purple-700 hover:border-purple-300'}`}
-                              />
-                            </td>
-                            {/* Điểm Cộng */}
-                            <td className="px-6 py-4 text-center bg-emerald-50/10">
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="font-black text-emerald-600 text-sm">+{grade.bonusTotal || 0}</span>
+                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-5                             <td className="px-6 py-4 text-center bg-emerald-50/10">
+                               <div className="flex flex-col items-center gap-1">
+                                <span className={`font-black text-emerald-600 text-sm ${edits.bonusTotal !== undefined ? 'animate-pulse' : ''}`}>+{displayGrade.bonusTotal || 0}</span>
                                 <div className="flex gap-2">
                                   <button onClick={() => updateBonus(student.id, -0.25)} className="text-emerald-500 hover:scale-110 transition-transform">
                                     <MinusCircle size={14} />
@@ -1508,9 +1472,24 @@ export default function App() {
                             {/* Điểm Trừ */}
                             <td className="px-6 py-4 text-center bg-rose-50/10">
                                <div className="flex flex-col items-center gap-1">
-                                <span className="font-black text-rose-600 text-sm">-{grade.penaltyTotal || 0}</span>
+                                <span className={`font-black text-rose-600 text-sm ${edits.penaltyTotal !== undefined ? 'animate-pulse' : ''}`}>-{displayGrade.penaltyTotal || 0}</span>
                                 <div className="flex gap-2">
                                   <button onClick={() => updatePenalty(student.id, -0.25)} className="text-rose-500 hover:scale-110 transition-transform">
+                                    <MinusCircle size={14} />
+                                  </button>
+                                  <button onClick={() => updatePenalty(student.id, 0.25)} className="text-rose-500 hover:scale-110 transition-transform">
+                                    <PlusCircle size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                            {/* Điểm Ròng */}
+                            <td className="px-6 py-4 text-center bg-indigo-50/20">
+                              <span className={`text-sm font-bold ${((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? 'text-emerald-600' : ((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                {((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? '+' : ''}{(displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)}
+                              </span>
+                            </td>
+ssName="text-rose-500 hover:scale-110 transition-transform">
                                     <MinusCircle size={14} />
                                   </button>
                                   <button onClick={() => updatePenalty(student.id, 0.25)} className="text-rose-500 hover:scale-110 transition-transform">
@@ -1693,7 +1672,21 @@ export default function App() {
                       Lịch sử thay đổi
                     </h3>
                     <button 
-                      onClick={() => setData(prev => ({ ...prev, history: [] }))}
+                      onClick={() => {
+                        Swal.fire({
+                          title: 'Xóa toàn bộ nhật ký?',
+                          text: 'Lịch sử thay đổi điểm sẽ bị xóa vĩnh viễn!',
+                          icon: 'warning',
+                          showCancelButton: true,
+                          confirmButtonColor: '#ef4444',
+                          confirmButtonText: 'Xóa hết',
+                          cancelButtonText: 'Hủy'
+                        }).then(res => {
+                          if (res.isConfirmed) {
+                            setData(prev => ({ ...prev, history: [] }));
+                          }
+                        });
+                      }}
                       className="text-xs text-rose-500 font-bold hover:underline"
                     >
                       Xóa nhật ký
@@ -1778,14 +1771,7 @@ export default function App() {
                           return nameMatch && classMatch && yearMatch && semesterMatch;
                         });
 
-                        const latestHistoryMap = new Map<string, HistoryRecord>();
-                        filteredHistory.forEach(h => {
-                          if (!latestHistoryMap.has(h.studentId)) {
-                            latestHistoryMap.set(h.studentId, h);
-                          }
-                        });
-
-                        return Array.from(latestHistoryMap.values()).map((item) => {
+                        return filteredHistory.map((item) => {
                           const student = allStudents.find(s => s.id === item.studentId);
                           const totalChanges = data.history.filter(h => h.studentId === item.studentId).length;
 
