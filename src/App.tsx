@@ -1321,6 +1321,7 @@ export default function App() {
                       })}
                     </tbody>
                   </table>
+                  )}
                 </div>
                 {classStudents.length === 0 && (
                   <div className="py-12 flex flex-col items-center justify-center text-slate-400">
