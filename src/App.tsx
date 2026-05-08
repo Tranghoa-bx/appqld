@@ -1456,7 +1456,20 @@ export default function App() {
                                 type="text"
                                 value={draftGrades[student.id]?.h1 !== undefined ? draftGrades[student.id].h1 : grade.h1.join(' ')}
                                 onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), h1: e.target.value } }))}
-                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-5                             <td className="px-6 py-4 text-center bg-emerald-50/10">
+                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-indigo-200 focus:border-indigo-500 text-indigo-700 hover:border-indigo-300'}`}
+                              />
+                            </td>
+                            {/* Cuối Kỳ */}
+                            <td className="px-6 py-4 text-center">
+                              <input 
+                                type="text"
+                                value={draftGrades[student.id]?.semester !== undefined ? draftGrades[student.id].semester : (grade.semester !== null ? grade.semester : '')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), semester: e.target.value } }))}
+                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.semester !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-purple-200 focus:border-purple-500 text-purple-700 hover:border-purple-300'}`}
+                              />
+                            </td>
+                            {/* Điểm Cộng */}
+                            <td className="px-6 py-4 text-center bg-emerald-50/10">
                                <div className="flex flex-col items-center gap-1">
                                 <span className={`font-black text-emerald-600 text-sm ${edits.bonusTotal !== undefined ? 'animate-pulse' : ''}`}>+{displayGrade.bonusTotal || 0}</span>
                                 <div className="flex gap-2">
@@ -1487,21 +1500,6 @@ export default function App() {
                             <td className="px-6 py-4 text-center bg-indigo-50/20">
                               <span className={`text-sm font-bold ${((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? 'text-emerald-600' : ((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
                                 {((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? '+' : ''}{(displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)}
-                              </span>
-                            </td>
-ssName="text-rose-500 hover:scale-110 transition-transform">
-                                    <MinusCircle size={14} />
-                                  </button>
-                                  <button onClick={() => updatePenalty(student.id, 0.25)} className="text-rose-500 hover:scale-110 transition-transform">
-                                    <PlusCircle size={14} />
-                                  </button>
-                                </div>
-                              </div>
-                            </td>
-                            {/* Điểm Ròng */}
-                            <td className="px-6 py-4 text-center bg-indigo-50/20">
-                              <span className={`text-sm font-bold ${((grade.bonusTotal || 0) - (grade.penaltyTotal || 0)) > 0 ? 'text-emerald-600' : ((grade.bonusTotal || 0) - (grade.penaltyTotal || 0)) < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                                {((grade.bonusTotal || 0) - (grade.penaltyTotal || 0)) > 0 ? '+' : ''}{(grade.bonusTotal || 0) - (grade.penaltyTotal || 0)}
                               </span>
                             </td>
                             {/* ĐTB */}
