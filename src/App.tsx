@@ -72,6 +72,11 @@ const stripAiSpecialChars = (text: string) => {
     .replace(/- /g, "• ")
     .replace(/\[/g, "(")
     .replace(/\]/g, ")")
+    .replace(/s_\d+_\d+/g, "") // Xóa mã ID học sinh
+    .replace(/s_\d+/g, "")     // Xóa mã ID học sinh dạng ngắn
+    .replace(/oral|m15|h1|semester|bonusTotal|penaltyTotal|average/gi, "") // Xóa từ khóa kỹ thuật
+    .replace(/\{.*\}/g, "")    // Xóa JSON nếu AI lỡ ghi ra
+    .replace(/\n\s*\n/g, "\n") // Xóa dòng trống thừa
     .trim();
 };
 
@@ -504,12 +509,12 @@ export default function App() {
       <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
       <head><meta charset='utf-8'><title>Báo cáo Phân tích AI</title>
       <style>
-        body { font-family: 'Times New Roman', serif; line-height: 1.6; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .student-section { margin-bottom: 40px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
-        .student-name { font-size: 16pt; font-bold; color: #1e3a8a; }
-        .analysis-content { font-size: 12pt; text-align: justify; }
-        .footer { font-size: 10pt; color: #666; margin-top: 50px; text-align: right; }
+        body { font-family: 'Times New Roman', serif; line-height: 1.15; color: #000; }
+        .header { text-align: center; margin-bottom: 25px; }
+        .student-section { margin-bottom: 25px; border-bottom: 1px solid #ccc; padding-bottom: 15px; page-break-inside: avoid; }
+        .student-name { font-size: 14pt; font-weight: bold; margin-bottom: 8px; text-decoration: underline; }
+        .analysis-content { font-size: 12pt; text-align: left; margin-left: 10px; }
+        .footer { font-size: 10pt; color: #444; margin-top: 40px; text-align: right; font-style: italic; }
       </style>
       </head>
       <body>
@@ -556,7 +561,7 @@ export default function App() {
   const exportExcel = () => {
     if (!activeClass) return;
     
-    // 1. Tạo sheet Bảng điểm chi tiết
+    // 1. Tạo dữ liệu cho sheet chính
     const title = [["BÁO CÁO KẾT QUẢ HỌC TẬP"]];
     const info = [
       [`Lớp: ${activeClass.name}`, `Năm học: ${selectedYear}`, `Học kỳ: ${selectedSemester === 'CN' ? 'Cả năm' : selectedSemester}`, `Môn: ${selectedSubject}`],
@@ -568,7 +573,7 @@ export default function App() {
     let tableData: any[][] = [];
 
     if (selectedSemester === 'CN') {
-      tableHeaders = ['STT', 'Họ và Tên', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Hạng', 'Xếp loại', 'Nhận xét (AI)'];
+      tableHeaders = ['STT', 'Họ và Tên', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Hạng', 'Xếp loại'];
       tableData = classStudents.map((s, idx) => {
         const rowNum = idx + 6;
         const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
@@ -578,7 +583,6 @@ export default function App() {
         const avg1 = hk1Grade ? calculateAverage(hk1Grade) : 0;
         const avg2 = hk2Grade ? calculateAverage(hk2Grade) : 0;
         const hasGrade = avg1 > 0 || avg2 > 0;
-        const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
         const cnAvg = hasGrade ? Math.round(((avg1 + avg2 * 2) / 3) * 10) / 10 : 0;
         
         return [
@@ -588,12 +592,11 @@ export default function App() {
           avg2 || 0,
           { f: `ROUND((C${rowNum}+D${rowNum}*2)/3,1)` },
           hasGrade ? cnRanks[s.id] : '',
-          hasGrade ? getRank(cnAvg).label : '',
-          stripAiSpecialChars(g?.aiAnalysis || "").substring(0, 70)
+          hasGrade ? getRank(cnAvg).label : ''
         ];
       });
     } else {
-      tableHeaders = ['STT', 'Họ và Tên', 'TX1', 'TX2', 'TX3', 'TX4', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng (+)', 'Trừ (-)', 'ĐTB', 'Hạng', 'Xếp loại', 'Nhận xét (AI)'];
+      tableHeaders = ['STT', 'Họ và Tên', 'TX1', 'TX2', 'TX3', 'TX4', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng (+)', 'Trừ (-)', 'ĐTB', 'Hạng', 'Xếp loại'];
       tableData = classStudents.map((s, idx) => {
         const rowNum = idx + 6;
         const g = classGrades.find(grade => grade.studentId === s.id);
@@ -611,36 +614,33 @@ export default function App() {
           g?.penaltyTotal || 0,
           { f: `ROUND((C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}+G${rowNum}*2+H${rowNum}*3)/9,1)` },
           avg > 0 ? normalRanks[s.id] : '',
-          avg > 0 ? getRank(avg).label : '',
-          stripAiSpecialChars(g?.aiAnalysis || "").substring(0, 70)
+          avg > 0 ? getRank(avg).label : ''
         ];
       });
     }
 
-    const wsData = [...title, ...info, tableHeaders, ...tableData];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      { wch: 5 }, { wch: 25 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, 
-      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, 
-      { wch: 8 }, { wch: 12 }, { wch: 40 }
-    ];
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
-
-    // 2. Tạo sheet Thống kê & Biểu đồ (Dữ liệu nguồn)
-    const statTitle = [["THỐNG KÊ TỔNG HỢP HỌC LỰC"]];
-    const statHeaders = ['Loại', 'Số lượng', 'Tỷ lệ (%)'];
-    const statData = [
+    const statRows = [
+      [], [], // Cách 2 dòng
+      ["THỐNG KÊ TỔNG HỢP HỌC LỰC"],
+      ['Loại học lực', 'Số lượng', 'Tỷ lệ (%)'],
       ['Giỏi (8.0 - 10)', stats.gioi, `${Math.round((stats.gioi/stats.total)*100) || 0}%`],
       ['Khá (6.5 - 7.9)', stats.kha, `${Math.round((stats.kha/stats.total)*100) || 0}%`],
       ['Trung bình (5.0 - 6.4)', stats.tb, `${Math.round((stats.tb/stats.total)*100) || 0}%`],
-      ['Yếu (< 5.0)', stats.yeu, `${Math.round((stats.yeu/stats.total)*100) || 0}%`],
-      [],
-      ['Tổng số học sinh', stats.total, '100%']
+      ['Yêu (< 5.0)', stats.yeu, `${Math.round((stats.yeu/stats.total)*100) || 0}%`],
+      ['Tổng số', stats.total, '100%']
     ];
-    const wsStat = XLSX.utils.aoa_to_sheet([...statTitle, [], statHeaders, ...statData]);
-    wsStat['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }];
 
-    // 3. Tạo sheet Phân tích AI riêng
+    const wsData = [...title, ...info, tableHeaders, ...tableData, ...statRows];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    
+    // Cấu hình độ rộng cột
+    ws['!cols'] = selectedSemester === 'CN' 
+      ? [{ wch: 5 }, { wch: 25 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }]
+      : [{ wch: 5 }, { wch: 25 }, { wch: 6 }, { wch: 6 }, { wch: 6 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 12 }];
+
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+
+    // 2. Sheet Phân tích AI riêng biệt
     const aiTitle = [["BÁO CÁO PHÂN TÍCH CHI TIẾT AI"]];
     const aiHeaders = ['STT', 'Họ và Tên', 'Nội dung phân tích'];
     const aiData = classStudents.map((s, idx) => {
@@ -655,8 +655,7 @@ export default function App() {
     wsAi['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 120 }];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Bảng điểm");
-    XLSX.utils.book_append_sheet(wb, wsStat, "Thống kê");
+    XLSX.utils.book_append_sheet(wb, ws, "Bảng điểm & Thống kê");
     XLSX.utils.book_append_sheet(wb, wsAi, "Phân tích AI");
     
     XLSX.writeFile(wb, `BaoCao_SmartGrade_${activeClass.name}_${selectedYear}.xlsx`);
