@@ -486,7 +486,7 @@ export default function App() {
       
       return `
         <div class="student-section">
-          <div class="student-name">${idx + 1}. Học sinh: ${s.name}</div>
+          <div class="student-name">Học sinh: ${s.name}</div>
           <div class="analysis-content">
             ${formattedAnalysis.replace(/\n/g, '<br/>')}
           </div>
