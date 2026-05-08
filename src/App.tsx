@@ -26,8 +26,8 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
-import { INITIAL_DATA } from './constants';
-import { AppData, SCORE_WEIGHTS, Grade, Student, AVAILABLE_YEARS, AVAILABLE_SEMESTERS, DEFAULT_SUBJECTS } from './types';
+import { INITIAL_DATA, AVAILABLE_YEARS, AVAILABLE_SEMESTERS, DEFAULT_SUBJECTS, SCORE_WEIGHTS } from './constants';
+import { AppData, Grade, Student } from './types';
 import { callGeminiAI, PROMPTS } from './lib/gemini';
 import {
   Chart as ChartJS,
