@@ -1885,8 +1885,7 @@ export default function App() {
             >
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-slate-100 card-shadow">
-                  <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-                    <BarChart3 size={20} className="text-blue-500" />
+                  <h3 className="text-lg font-bold text-slate-900 mb-6">
                     Thống kê phân bổ học lực: {activeClass?.name}
                   </h3>
                   <div className="h-80">
