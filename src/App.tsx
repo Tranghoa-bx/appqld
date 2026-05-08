@@ -284,7 +284,7 @@ export default function App() {
           students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), ...newStudents] },
           grades: { ...prev.grades, [selectedClassId]: [...(prev.grades[selectedClassId] || []), ...newGrades] }
         }));
-        Swal.fire('Thành công', \`Đã thêm \${newStudents.length} học sinh!\`, 'success');
+        Swal.fire('Thành công', `Đã thêm ${newStudents.length} học sinh!`, 'success');
       }
     });
   };
