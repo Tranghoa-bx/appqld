@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   AlertCircle,
   History,
-  Clock
+  Clock,
+  CalendarCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Swal from 'sweetalert2';
@@ -231,6 +232,137 @@ export default function App() {
     Swal.fire('Thành công', 'Đã xuất file Excel!', 'success');
   };
 
+  const importExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activeClass || !e.target.files?.length) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rows = XLSX.utils.sheet_to_json<any>(ws);
+
+        if (rows.length === 0) {
+          Swal.fire('Lỗi', 'File Excel không có dữ liệu', 'error');
+          return;
+        }
+
+        const newStudents: Student[] = [];
+        const newGrades: Grade[] = [];
+
+        rows.forEach((row, index) => {
+          const name = row['Họ và Tên'] || row['Họ tên'] || row['Name'] || row['Họ Và Tên'];
+          if (!name) return;
+
+          const studentId = `s_${Date.now()}_${index}`;
+          const gender = String(row['Giới tính'] || row['Gender'] || '').toLowerCase() === 'nữ' ? 'Nữ' : 'Nam';
+
+          newStudents.push({ id: studentId, name: String(name), gender });
+          newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 });
+        });
+
+        if (newStudents.length > 0) {
+          setData(prev => ({
+            ...prev,
+            students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), ...newStudents] },
+            grades: { ...prev.grades, [selectedClassId]: [...(prev.grades[selectedClassId] || []), ...newGrades] }
+          }));
+          Swal.fire('Thành công', `Đã nhập ${newStudents.length} học sinh!`, 'success');
+        } else {
+          Swal.fire('Lỗi', 'Không tìm thấy cột "Họ và Tên" trong file', 'error');
+        }
+      } catch (err) {
+        Swal.fire('Lỗi', 'Đã xảy ra lỗi khi đọc file Excel', 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleCloseMonth = () => {
+    if (!activeClass || classStudents.length === 0) return;
+    
+    Swal.fire({
+      title: 'Bạn muốn reset điểm cộng/trừ của chu kỳ hiện tại?',
+      html: `
+        <div class="text-left text-sm mb-4">
+          <p class="font-bold text-rose-600 mb-2">Lưu lại tất cả các lịch sử</p>
+          <p>Dữ liệu hiện tại gồm:</p>
+          <ul class="list-disc ml-5 mt-1 text-slate-700">
+            <li>Tổng điểm cộng</li>
+            <li>Tổng điểm trừ</li>
+            <li>Điểm ròng</li>
+            <li>Lịch sử cộng/trừ trong chu kỳ</li>
+          </ul>
+          <p class="mt-3 font-semibold">Vui lòng chọn cách xử lý:</p>
+        </div>
+      `,
+      showCancelButton: true,
+      showDenyButton: true,
+      confirmButtonText: 'Chốt sớm và reset',
+      denyButtonText: 'Xóa dữ liệu nháp',
+      cancelButtonText: 'Hủy',
+      confirmButtonColor: '#4f46e5',
+      denyButtonColor: '#ef4444',
+      customClass: {
+        actions: 'flex-col sm:flex-row gap-2',
+        confirmButton: 'order-1 w-full sm:w-auto',
+        denyButton: 'order-2 w-full sm:w-auto',
+        cancelButton: 'order-3 w-full sm:w-auto'
+      }
+    }).then((result) => {
+      if (result.isConfirmed) {
+        const currentMonth = dayjs().format('MM/YYYY');
+        const timestamp = dayjs().toISOString();
+        
+        setData(prev => {
+          const newGrades = prev.grades[selectedClassId].map(grade => {
+            const net = (grade.bonusTotal || 0) - (grade.penaltyTotal || 0);
+            let suggestion = 'Bình thường';
+            if (net >= 2) suggestion = 'Tuyên dương';
+            else if (net > 0) suggestion = 'Khen ngợi';
+            else if (net <= -2) suggestion = 'Cảnh cáo';
+            else if (net < 0) suggestion = 'Cần cố gắng';
+            
+            const newRecord = {
+              month: \`Tháng \${currentMonth}\`,
+              bonus: grade.bonusTotal || 0,
+              penalty: grade.penaltyTotal || 0,
+              net,
+              suggestion,
+              timestamp
+            };
+            
+            return {
+              ...grade,
+              bonusTotal: 0,
+              penaltyTotal: 0,
+              monthlyHistory: [...(grade.monthlyHistory || []), newRecord]
+            };
+          });
+          
+          return {
+            ...prev,
+            grades: { ...prev.grades, [selectedClassId]: newGrades }
+          };
+        });
+        Swal.fire('Thành công', 'Đã chốt kỳ và lưu lịch sử!', 'success');
+      } else if (result.isDenied) {
+        setData(prev => {
+          const newGrades = prev.grades[selectedClassId].map(grade => ({
+            ...grade,
+            bonusTotal: 0,
+            penaltyTotal: 0
+          }));
+          return { ...prev, grades: { ...prev.grades, [selectedClassId]: newGrades } };
+        });
+        Swal.fire('Đã xóa', 'Dữ liệu nháp đã được reset về 0.', 'info');
+      }
+    });
+  };
+
   const handleAiAnalyze = async (student: Student) => {
     const grade = classGrades.find(g => g.studentId === student.id);
     if (!grade) return;
@@ -311,20 +443,121 @@ export default function App() {
           </div>
 
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 px-2">Danh sách lớp</p>
+            <div className="flex items-center justify-between px-2 mb-3">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Danh sách lớp</p>
+              <button 
+                onClick={() => {
+                  Swal.fire({
+                    title: 'Thêm lớp học mới',
+                    html: `
+                      <input id="swal-class-name" class="swal2-input" placeholder="Tên lớp (VD: 9A1)">
+                      <input id="swal-class-subject" class="swal2-input" placeholder="Môn học (VD: Toán học)">
+                    `,
+                    focusConfirm: false,
+                    showCancelButton: true,
+                    confirmButtonText: 'Thêm lớp',
+                    cancelButtonText: 'Hủy',
+                    preConfirm: () => {
+                      const name = (document.getElementById('swal-class-name') as HTMLInputElement).value;
+                      const subject = (document.getElementById('swal-class-subject') as HTMLInputElement).value;
+                      if (!name || !subject) {
+                        Swal.showValidationMessage('Vui lòng nhập đầy đủ tên lớp và môn học');
+                      }
+                      return { name, subject };
+                    }
+                  }).then((result) => {
+                    if (result.isConfirmed) {
+                      const newId = Math.random().toString(36).substr(2, 9);
+                      setData(prev => ({
+                        ...prev,
+                        classes: [...prev.classes, { id: newId, name: result.value.name, subject: result.value.subject }],
+                        students: { ...prev.students, [newId]: [] },
+                        grades: { ...prev.grades, [newId]: [] }
+                      }));
+                      setSelectedClassId(newId);
+                      setActiveTab('grading');
+                    }
+                  });
+                }}
+                className="text-blue-500 hover:bg-blue-50 p-1 rounded transition-colors"
+                title="Thêm lớp"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
             <div className="space-y-1">
               {data.classes.map(cls => (
-                <button
-                  key={cls.id}
-                  onClick={() => { setSelectedClassId(cls.id); setActiveTab('grading'); }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm transition-all ${selectedClassId === cls.id ? 'bg-slate-100 text-slate-900 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${selectedClassId === cls.id ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
-                    <span>{cls.name}</span>
-                  </div>
-                  <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md">{cls.subject}</span>
-                </button>
+                <div key={cls.id} className="relative group">
+                  <button
+                    onClick={() => { setSelectedClassId(cls.id); setActiveTab('grading'); }}
+                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm transition-all pr-8 ${selectedClassId === cls.id ? 'bg-slate-100 text-slate-900 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${selectedClassId === cls.id ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
+                      <span className="truncate max-w-[80px]">{cls.name}</span>
+                    </div>
+                    <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md truncate max-w-[60px]">{cls.subject}</span>
+                  </button>
+                  {selectedClassId === cls.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        Swal.fire({
+                          title: 'Chỉnh sửa lớp học',
+                          html: `
+                            <input id="swal-edit-name" class="swal2-input" value="${cls.name}" placeholder="Tên lớp">
+                            <input id="swal-edit-subject" class="swal2-input" value="${cls.subject}" placeholder="Môn học">
+                          `,
+                          showCancelButton: true,
+                          showDenyButton: true,
+                          confirmButtonText: 'Lưu',
+                          denyButtonText: 'Xóa lớp',
+                          cancelButtonText: 'Hủy',
+                          denyButtonColor: '#ef4444',
+                          preConfirm: () => {
+                            const name = (document.getElementById('swal-edit-name') as HTMLInputElement).value;
+                            const subject = (document.getElementById('swal-edit-subject') as HTMLInputElement).value;
+                            if (!name || !subject) Swal.showValidationMessage('Vui lòng nhập đầy đủ');
+                            return { name, subject };
+                          }
+                        }).then((result) => {
+                          if (result.isConfirmed) {
+                            setData(prev => ({
+                              ...prev,
+                              classes: prev.classes.map(c => c.id === cls.id ? { ...c, name: result.value.name, subject: result.value.subject } : c)
+                            }));
+                          } else if (result.isDenied) {
+                            Swal.fire({
+                              title: 'Xóa lớp học?',
+                              text: 'Toàn bộ học sinh và điểm số của lớp này sẽ bị xóa!',
+                              icon: 'warning',
+                              showCancelButton: true,
+                              confirmButtonText: 'Đồng ý xóa',
+                              cancelButtonText: 'Hủy',
+                              confirmButtonColor: '#ef4444'
+                            }).then(delRes => {
+                              if (delRes.isConfirmed) {
+                                setData(prev => {
+                                  const newClasses = prev.classes.filter(c => c.id !== cls.id);
+                                  const newStudents = { ...prev.students };
+                                  delete newStudents[cls.id];
+                                  const newGrades = { ...prev.grades };
+                                  delete newGrades[cls.id];
+                                  return { ...prev, classes: newClasses, students: newStudents, grades: newGrades };
+                                });
+                                setSelectedClassId(data.classes.find(c => c.id !== cls.id)?.id || '');
+                              }
+                            });
+                          }
+                        });
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-blue-500 hover:bg-slate-200 rounded transition-colors"
+                      title="Sửa/Xóa lớp"
+                    >
+                      <SettingsIcon size={14} />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -372,10 +605,21 @@ export default function App() {
               />
             </div>
             {activeTab === 'grading' && (
-              <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
-                <Download size={18} />
-                <span className="hidden sm:inline">Xuất Excel</span>
-              </button>
+              <>
+                <button onClick={handleCloseMonth} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
+                  <CalendarCheck size={18} />
+                  <span className="hidden sm:inline">Chốt kỳ</span>
+                </button>
+                <label className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md cursor-pointer">
+                  <Upload size={18} />
+                  <span className="hidden sm:inline">Nhập Excel</span>
+                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={importExcel} />
+                </label>
+                <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
+                  <Download size={18} />
+                  <span className="hidden sm:inline">Xuất Excel</span>
+                </button>
+              </>
             )}
           </div>
         </header>
@@ -422,6 +666,7 @@ export default function App() {
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Cuối Kỳ (x3)</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30">Cộng (+)</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Thao tác</th>
                       </tr>
@@ -440,9 +685,40 @@ export default function App() {
                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${student.gender === 'Nam' ? 'bg-blue-400' : 'bg-rose-400'}`}>
                                   {student.name.charAt(0)}
                                 </div>
-                                <div className="leading-none">
-                                  <p className="font-bold text-slate-900">{student.name}</p>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${rank.bg} ${rank.color}`}>
+                                <div className="leading-none cursor-pointer group" onClick={() => {
+                                  Swal.fire({
+                                    title: 'Sửa thông tin học sinh',
+                                    html: `
+                                      <input id="swal-student-name" class="swal2-input" value="${student.name}" placeholder="Tên học sinh">
+                                      <select id="swal-student-gender" class="swal2-select">
+                                        <option value="Nam" ${student.gender === 'Nam' ? 'selected' : ''}>Nam</option>
+                                        <option value="Nữ" ${student.gender === 'Nữ' ? 'selected' : ''}>Nữ</option>
+                                      </select>
+                                    `,
+                                    showCancelButton: true,
+                                    confirmButtonText: 'Lưu',
+                                    cancelButtonText: 'Hủy',
+                                    preConfirm: () => {
+                                      const name = (document.getElementById('swal-student-name') as HTMLInputElement).value;
+                                      const gender = (document.getElementById('swal-student-gender') as HTMLSelectElement).value as 'Nam' | 'Nữ';
+                                      if (!name) Swal.showValidationMessage('Vui lòng nhập tên học sinh');
+                                      return { name, gender };
+                                    }
+                                  }).then((res) => {
+                                    if (res.isConfirmed) {
+                                      setData(prev => {
+                                        const newStudents = [...(prev.students[selectedClassId] || [])];
+                                        const idx = newStudents.findIndex(s => s.id === student.id);
+                                        if (idx !== -1) newStudents[idx] = { ...newStudents[idx], name: res.value.name, gender: res.value.gender };
+                                        return { ...prev, students: { ...prev.students, [selectedClassId]: newStudents } };
+                                      });
+                                    }
+                                  });
+                                }}>
+                                  <p className="font-bold text-slate-900 group-hover:text-blue-600 flex items-center gap-1">
+                                    {student.name} <SettingsIcon size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </p>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider mt-1 inline-block ${rank.bg} ${rank.color}`}>
                                     {rank.label}
                                   </span>
                                 </div>
@@ -641,6 +917,12 @@ export default function App() {
                                 </div>
                               </div>
                             </td>
+                            {/* Điểm Ròng */}
+                            <td className="px-6 py-4 text-center bg-indigo-50/20">
+                              <span className={`text-sm font-bold ${((grade.bonusTotal || 0) - (grade.penaltyTotal || 0)) > 0 ? 'text-emerald-600' : ((grade.bonusTotal || 0) - (grade.penaltyTotal || 0)) < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                {((grade.bonusTotal || 0) - (grade.penaltyTotal || 0)) > 0 ? '+' : ''}{(grade.bonusTotal || 0) - (grade.penaltyTotal || 0)}
+                              </span>
+                            </td>
                             {/* ĐTB */}
                             <td className="px-6 py-4 text-center bg-blue-50/20">
                               <span className={`text-lg font-black ${rank.color}`}>
@@ -652,11 +934,47 @@ export default function App() {
                               <div className="flex items-center justify-end gap-2">
                                 <button 
                                   onClick={() => {
-                                    setSearchQuery(student.name);
-                                    setActiveTab('history');
+                                    const mHistory = grade.monthlyHistory || [];
+                                    if (mHistory.length === 0) {
+                                      Swal.fire('Thông báo', 'Học sinh này chưa có dữ liệu chốt kỳ nào.', 'info');
+                                    } else {
+                                      const tableRows = mHistory.map(h => \`
+                                        <tr class="border-b">
+                                          <td class="p-2 text-left">\${h.month}</td>
+                                          <td class="p-2 text-emerald-600 font-bold">+\${h.bonus}</td>
+                                          <td class="p-2 text-rose-600 font-bold">-\${h.penalty}</td>
+                                          <td class="p-2 font-black \${h.net > 0 ? 'text-emerald-600' : h.net < 0 ? 'text-rose-600' : 'text-slate-500'}">\${h.net > 0 ? '+' : ''}\${h.net}</td>
+                                          <td class="p-2 text-sm">\${h.suggestion}</td>
+                                        </tr>
+                                      \`).join('');
+                                      
+                                      Swal.fire({
+                                        title: \`Lịch sử chốt kỳ: \${student.name}\`,
+                                        html: \`
+                                          <div class="max-h-[60vh] overflow-y-auto">
+                                            <table class="w-full text-sm">
+                                              <thead class="bg-slate-50 sticky top-0">
+                                                <tr>
+                                                  <th class="p-2 text-left text-slate-500">Chu kỳ</th>
+                                                  <th class="p-2 text-slate-500">Cộng</th>
+                                                  <th class="p-2 text-slate-500">Trừ</th>
+                                                  <th class="p-2 text-slate-500">Ròng</th>
+                                                  <th class="p-2 text-slate-500">Gợi ý</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                \${tableRows}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        \`,
+                                        width: '600px',
+                                        confirmButtonText: 'Đóng'
+                                      });
+                                    }
                                   }}
                                   className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all"
-                                  title="Xem lịch sử"
+                                  title="Xem lịch sử chốt kỳ"
                                 >
                                   <Clock size={18} />
                                 </button>
@@ -668,7 +986,33 @@ export default function App() {
                                 >
                                   <BrainCircuit size={18} className={isAiLoading ? "animate-pulse" : ""} />
                                 </button>
-                                <button className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Xóa">
+                                <button 
+                                  onClick={() => {
+                                    Swal.fire({
+                                      title: 'Xóa học sinh?',
+                                      text: `Bạn có chắc muốn xóa học sinh ${student.name}?`,
+                                      icon: 'warning',
+                                      showCancelButton: true,
+                                      confirmButtonText: 'Đồng ý xóa',
+                                      cancelButtonText: 'Hủy',
+                                      confirmButtonColor: '#ef4444'
+                                    }).then(res => {
+                                      if (res.isConfirmed) {
+                                        setData(prev => {
+                                          const newStudents = prev.students[selectedClassId].filter(s => s.id !== student.id);
+                                          const newGrades = prev.grades[selectedClassId].filter(g => g.studentId !== student.id);
+                                          return {
+                                            ...prev,
+                                            students: { ...prev.students, [selectedClassId]: newStudents },
+                                            grades: { ...prev.grades, [selectedClassId]: newGrades }
+                                          };
+                                        });
+                                      }
+                                    });
+                                  }}
+                                  className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all" 
+                                  title="Xóa"
+                                >
                                   <Trash2 size={18} />
                                 </button>
                               </div>
@@ -683,7 +1027,39 @@ export default function App() {
                   <div className="py-12 flex flex-col items-center justify-center text-slate-400">
                     <Users size={48} strokeWidth={1.5} className="mb-4 opacity-20" />
                     <p>Chưa có học sinh nào trong lớp này</p>
-                    <button className="mt-4 flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl font-medium">
+                    <button 
+                      onClick={() => {
+                        Swal.fire({
+                          title: 'Thêm học sinh',
+                          html: `
+                            <input id="swal-new-student-name" class="swal2-input" placeholder="Họ và Tên">
+                            <select id="swal-new-student-gender" class="swal2-select">
+                              <option value="Nam">Nam</option>
+                              <option value="Nữ">Nữ</option>
+                            </select>
+                          `,
+                          showCancelButton: true,
+                          confirmButtonText: 'Thêm',
+                          cancelButtonText: 'Hủy',
+                          preConfirm: () => {
+                            const name = (document.getElementById('swal-new-student-name') as HTMLInputElement).value;
+                            const gender = (document.getElementById('swal-new-student-gender') as HTMLSelectElement).value as 'Nam' | 'Nữ';
+                            if (!name) Swal.showValidationMessage('Vui lòng nhập tên');
+                            return { name, gender };
+                          }
+                        }).then(res => {
+                          if (res.isConfirmed) {
+                            const newId = \`s_\${Date.now()}\`;
+                            setData(prev => ({
+                              ...prev,
+                              students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), { id: newId, name: res.value.name, gender: res.value.gender }] },
+                              grades: { ...prev.grades, [selectedClassId]: [...(prev.grades[selectedClassId] || []), { studentId: newId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 }] }
+                            }));
+                          }
+                        });
+                      }}
+                      className="mt-4 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-medium transition-colors"
+                    >
                       <Plus size={18} /> Thêm học sinh
                     </button>
                   </div>
