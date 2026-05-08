@@ -1769,7 +1769,17 @@ export default function App() {
                           return nameMatch && classMatch && yearMatch && semesterMatch;
                         });
 
-                        return filteredHistory.map((item) => {
+                        // Group by student so each student appears only once
+                        const studentGroups = filteredHistory.reduce((acc, h) => {
+                          if (!acc[h.studentId]) {
+                            acc[h.studentId] = h; // Keep the latest change (history is ordered newest first)
+                          }
+                          return acc;
+                        }, {} as Record<string, HistoryRecord>);
+
+                        const displayedHistory = Object.values(studentGroups);
+
+                        return displayedHistory.map((item) => {
                           const student = allStudents.find(s => s.id === item.studentId);
                           const totalChanges = data.history.filter(h => h.studentId === item.studentId).length;
 
