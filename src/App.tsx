@@ -51,7 +51,7 @@ ChartJS.register(
 );
 
 // --- Constants internalized to avoid build export issues ---
-const DEFAULT_YEARS = ['2026-2027'];
+const DEFAULT_YEARS = ['2026-2027','2027-2028','2028-2029','2029-2030','2030-2031','2031-2032','2032-2033','2033-2034','2034-2035','2035-2036','2036-2037','2037-2038','2038-2039','2039-2040'];
 const AVAILABLE_SEMESTERS = [{id: 'HK1', name: 'Học kỳ I'}, {id: 'HK2', name: 'Học kỳ II'}, {id: 'CN', name: 'Cả năm'}];
 const DEFAULT_SUBJECTS = ['Toán', 'Ngữ văn', 'Ngoại ngữ', 'Vật lý', 'Hóa học', 'Sinh học', 'KHTN', 'Lịch sử', 'Địa lý', 'LS&ĐL', 'GDCD', 'Tin học', 'Công nghệ', 'Thể dục', 'Nghệ thuật', 'HĐTN, HN', 'GDKT & PL'];
 
@@ -98,7 +98,7 @@ const INITIAL_DATA: AppData = {
     geminiApiKey: '',
     modelName: 'gemini-1.5-flash',
     theme: 'light',
-    schoolYears: ['2026-2027']
+    schoolYears: ['2026-2027','2027-2028','2028-2029','2029-2030','2030-2031','2031-2032','2032-2033','2033-2034','2034-2035','2035-2036','2036-2037','2037-2038','2038-2039','2039-2040']
   }
 };
 
@@ -171,15 +171,12 @@ export default function App() {
         }
       }
       const mergedSettings = { ...INITIAL_DATA.settings, ...(parsed.settings || {}) };
-      // Keep only years from 2026 onward; remove legacy years before 2026-2027
-      if (!mergedSettings.schoolYears || mergedSettings.schoolYears.length === 0) {
-        mergedSettings.schoolYears = ['2026-2027'];
-      } else {
-        mergedSettings.schoolYears = mergedSettings.schoolYears.filter(
-          (y: string) => parseInt(y.split('-')[0]) >= 2026
-        );
-        if (mergedSettings.schoolYears.length === 0) mergedSettings.schoolYears = ['2026-2027'];
-      }
+      // Always include full DEFAULT_YEARS, plus any custom years user added (2026+)
+      const savedYears: string[] = (mergedSettings.schoolYears || []).filter(
+        (y: string) => parseInt(y.split('-')[0]) >= 2026
+      );
+      const combinedYears = Array.from(new Set([...DEFAULT_YEARS, ...savedYears])).sort();
+      mergedSettings.schoolYears = combinedYears;
       return { ...INITIAL_DATA, ...parsed, settings: mergedSettings };
     }
     return INITIAL_DATA;
@@ -490,62 +487,95 @@ export default function App() {
   const exportExcel = () => {
     if (!activeClass) return;
     
-    let exportData: any[] = [];
+    // Tạo "bản khung" báo cáo
+    const title = [["BÁO CÁO KẾT QUẢ HỌC TẬP VÀ PHÂN TÍCH AI"]];
+    const info = [
+      [`Lớp: ${activeClass.name}`, `Năm học: ${selectedYear}`, `Học kỳ: ${selectedSemester === 'CN' ? 'Cả năm' : selectedSemester}`, `Môn: ${selectedSubject}`],
+      [`Giáo viên: ${data.settings.teacherName || '...'}`],
+      [] // Hàng trống
+    ];
+
+    let tableHeaders: string[] = [];
+    let tableData: any[][] = [];
+
     if (selectedSemester === 'CN') {
-      const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
-      const hk2Key = `${selectedYear}_HK2_${selectedSubject}_${selectedClassId}`;
-      
-      exportData = classStudents.map(s => {
+      tableHeaders = ['STT', 'Họ và Tên', 'Giới tính', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Xếp hạng', 'Xếp loại', 'Phân tích AI'];
+      tableData = classStudents.map((s, idx) => {
+        const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
+        const hk2Key = `${selectedYear}_HK2_${selectedSubject}_${selectedClassId}`;
         const hk1Grade = (data.grades[hk1Key] || []).find(g => g.studentId === s.id);
         const hk2Grade = (data.grades[hk2Key] || []).find(g => g.studentId === s.id);
-        
         const avg1 = hk1Grade ? calculateAverage(hk1Grade) : 0;
         const avg2 = hk2Grade ? calculateAverage(hk2Grade) : 0;
-        
         let cnAvg = 0;
         if (avg1 > 0 || avg2 > 0) cnAvg = Math.round(((avg1 + avg2 * 2) / 3) * 10) / 10;
         const rank = getRank(cnAvg);
+        const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
         
-        return {
-          'Họ và Tên': s.name,
-          'Giới tính': s.gender,
-          'ĐTB HK I': avg1 || '',
-          'ĐTB HK II': avg2 || '',
-          'ĐTB Cả năm': cnAvg || '',
-          'Hạng': cnAvg > 0 ? cnRanks[s.id] : '',
-          'Xếp loại': cnAvg > 0 ? rank.label : '',
-          'Giáo viên': data.settings.teacherName || ''
-        };
+        return [
+          idx + 1,
+          s.name,
+          s.gender,
+          avg1 || '',
+          avg2 || '',
+          cnAvg || '',
+          cnAvg > 0 ? cnRanks[s.id] : '',
+          cnAvg > 0 ? rank.label : '',
+          g?.aiAnalysis || ''
+        ];
       });
     } else {
-      exportData = classStudents.map(s => {
+      tableHeaders = ['STT', 'Họ và Tên', 'Giới tính', 'Miệng', '15 Phút', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng', 'Trừ', 'ĐTB', 'Xếp hạng', 'Xếp loại', 'Phân tích AI'];
+      tableData = classStudents.map((s, idx) => {
         const g = classGrades.find(grade => grade.studentId === s.id);
         const avg = g ? calculateAverage(g) : 0;
-        const latestMonthly = g?.monthlyHistory && g.monthlyHistory.length > 0 ? g.monthlyHistory[g.monthlyHistory.length - 1] : null;
-        
-        return {
-          'Họ và Tên': s.name,
-          'Giới tính': s.gender,
-          'Điểm Miệng': g?.oral.join(', ') || '',
-          'Điểm 15 Phút': g?.m15.join(', ') || '',
-          'Điểm Giữa Kỳ': g?.h1.join(', ') || '',
-          'Điểm Cuối Kỳ': g?.semester !== null && g?.semester !== undefined ? g.semester : '',
-          'Đ. Cộng (+)': g?.bonusTotal || 0,
-          'Đ. Trừ (-)': g?.penaltyTotal || 0,
-          'ĐTB': avg,
-          'Hạng': avg > 0 ? normalRanks[s.id] : '',
-          'Xếp loại': getRank(avg).label,
-          'Nhận xét AI': latestMonthly ? latestMonthly.suggestion : '',
-          'Giáo viên': data.settings.teacherName || ''
-        };
+        return [
+          idx + 1,
+          s.name,
+          s.gender,
+          g?.oral.join(', ') || '',
+          g?.m15.join(', ') || '',
+          g?.h1.join(', ') || '',
+          g?.semester !== null && g?.semester !== undefined ? g.semester : '',
+          g?.bonusTotal || 0,
+          g?.penaltyTotal || 0,
+          avg,
+          avg > 0 ? normalRanks[s.id] : '',
+          getRank(avg).label,
+          g?.aiAnalysis || (g?.monthlyHistory?.length ? g.monthlyHistory[g.monthlyHistory.length - 1].suggestion : '')
+        ];
       });
     }
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wsData = [...title, ...info, tableHeaders, ...tableData];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Thiết lập độ rộng cột cơ bản
+    ws['!cols'] = [
+      { wch: 5 },  // STT
+      { wch: 25 }, // Họ tên
+      { wch: 10 }, // Giới tính
+      { wch: 8 },  // Miệng/HK1
+      { wch: 8 },  // 15P/HK2
+      { wch: 8 },  // GK/CN
+      { wch: 8 },  // CK/Rank
+      { wch: 8 },  // Cộng/Type
+      { wch: 8 },  // Trừ
+      { wch: 8 },  // ĐTB
+      { wch: 10 }, // Hạng
+      { wch: 12 }, // Xếp loại
+      { wch: 50 }, // Phân tích AI
+    ];
+
+    // Merge title
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }
+    ];
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, activeClass.name);
-    XLSX.writeFile(wb, `${activeClass.name}_DiemSo.xlsx`);
-    Swal.fire('Thành công', 'Đã xuất file Excel!', 'success');
+    XLSX.utils.book_append_sheet(wb, ws, "Báo cáo");
+    XLSX.writeFile(wb, `${activeClass.name}_BaoCao_SmartGrade.xlsx`);
+    Swal.fire('Thành công', 'Đã xuất file Excel báo cáo phân tích!', 'success');
   };
 
   const handlePasteStudents = () => {
@@ -773,6 +803,19 @@ export default function App() {
       const res = await callGeminiAI(prompt);
       if (res) {
         setAiResponse(res);
+        // Lưu vào state để có thể xuất Excel
+        setData(prev => {
+          const gradesArray = prev.grades[gradeKey] || [];
+          const index = gradesArray.findIndex(g => g.studentId === student.id);
+          let newGrades = [...gradesArray];
+          if (index !== -1) {
+            newGrades[index] = { ...newGrades[index], aiAnalysis: res };
+          } else {
+            newGrades.push({ studentId: student.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0, aiAnalysis: res });
+          }
+          return { ...prev, grades: { ...prev.grades, [gradeKey]: newGrades } };
+        });
+
         Swal.fire({
           title: `Phân tích AI: ${student.name}`,
           html: `<div class="text-left max-h-[60vh] overflow-y-auto prose prose-sm">${marked.parse(res)}</div>`,
@@ -780,6 +823,63 @@ export default function App() {
           confirmButtonText: 'Đã hiểu'
         });
       }
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleBatchAnalyze = async () => {
+    if (!activeClass || classStudents.length === 0) return;
+    
+    if (!data.settings.geminiApiKey) {
+      Swal.fire('Lỗi', 'Vui lòng cấu hình Gemini API Key trong phần Cài đặt', 'error');
+      return;
+    }
+
+    const { isConfirmed } = await Swal.fire({
+      title: 'Phân tích toàn bộ lớp?',
+      text: `Hệ thống sẽ thực hiện ${classStudents.length} lượt phân tích AI. Quá trình này có thể mất vài phút.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Bắt đầu',
+      cancelButtonText: 'Hủy'
+    });
+
+    if (!isConfirmed) return;
+
+    setIsAiLoading(true);
+    let successCount = 0;
+
+    try {
+      for (const student of classStudents) {
+        const grade = (data.grades[gradeKey] || []).find(g => g.studentId === student.id);
+        const gData = grade || { studentId: student.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 };
+        
+        const prompt = PROMPTS.analyzeStudent(student.name, {
+          ...gData,
+          average: calculateAverage(gData)
+        });
+
+        const res = await callGeminiAI(prompt);
+        if (res) {
+          setData(prev => {
+            const gradesArray = prev.grades[gradeKey] || [];
+            const index = gradesArray.findIndex(g => g.studentId === student.id);
+            let newGrades = [...gradesArray];
+            if (index !== -1) {
+              newGrades[index] = { ...newGrades[index], aiAnalysis: res };
+            } else {
+              newGrades.push({ ...gData, aiAnalysis: res });
+            }
+            return { ...prev, grades: { ...prev.grades, [gradeKey]: newGrades } };
+          });
+          successCount++;
+        }
+      }
+      Swal.fire('Hoàn thành', `Đã phân tích xong ${successCount}/${classStudents.length} học sinh!`, 'success');
+    } catch (error) {
+      console.error(error);
+      Swal.fire('Lỗi', 'Có lỗi xảy ra trong quá trình phân tích hàng loạt', 'error');
     } finally {
       setIsAiLoading(false);
     }
@@ -840,7 +940,7 @@ export default function App() {
 
           <div>
             <div className="flex items-center justify-between px-2 mb-3">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Danh sách lớp</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sổ điểm lớp</p>
               <button 
                 onClick={() => {
                   Swal.fire({
@@ -1007,6 +1107,10 @@ export default function App() {
                   <CalendarCheck size={18} />
                   <span className="hidden sm:inline">Chốt kỳ</span>
                 </button>
+                <button onClick={handleBatchAnalyze} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
+                  <BrainCircuit size={18} />
+                  <span className="hidden sm:inline">Phân tích lớp (AI)</span>
+                </button>
                 <button onClick={handlePasteStudents} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
                   <ClipboardList size={18} />
                   <span className="hidden sm:inline">Dán danh sách</span>
@@ -1096,7 +1200,7 @@ export default function App() {
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">ĐTB Học kỳ I</th>
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">ĐTB Học kỳ II</th>
                           <th className="px-6 py-4 text-xs font-bold text-blue-600 uppercase text-center bg-blue-50/30">ĐTB Cả năm</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Hạng</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Xếp loại</th>
                         </tr>
                       </thead>
@@ -1167,7 +1271,7 @@ export default function App() {
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Hạng</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -1497,7 +1601,7 @@ export default function App() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                       <Clock size={20} className="text-blue-500" />
-                      Lịch sử chỉnh sửa điểm
+                      Lịch sử thay đổi
                     </h3>
                     <button 
                       onClick={() => setData(prev => ({ ...prev, history: [] }))}
