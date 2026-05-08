@@ -315,29 +315,55 @@ export default function App() {
               }
             };
 
-            // Handle TX1-TX4: tx1,tx2 -> oral[0,1]; tx3,tx4 -> m15[0,1]
-            const txFields = ['tx1', 'tx2', 'tx3', 'tx4'];
-            const hasTx = txFields.some(f => edits[f] !== undefined);
-            if (hasTx) {
-              const parseNum = (v: string) => { const n = parseFloat(v.replace(',', '.')); return (!isNaN(n) && n >= 0 && n <= 10) ? n : null; };
-              const newOral = [...currentGrade.oral];
-              const newM15 = [...currentGrade.m15];
-              if (edits.tx1 !== undefined) { const v = parseNum(edits.tx1); if (v !== null) newOral[0] = v; else newOral.splice(0, 1); }
-              if (edits.tx2 !== undefined) { const v = parseNum(edits.tx2); if (v !== null) newOral[1] = v; else newOral.splice(1, 1); }
-              if (edits.tx3 !== undefined) { const v = parseNum(edits.tx3); if (v !== null) newM15[0] = v; else newM15.splice(0, 1); }
-              if (edits.tx4 !== undefined) { const v = parseNum(edits.tx4); if (v !== null) newM15[1] = v; else newM15.splice(1, 1); }
-              if (JSON.stringify(newOral) !== JSON.stringify(currentGrade.oral)) {
-                newHistory.unshift({ id: Math.random().toString(36).substr(2,9), studentId, timestamp, type: 'Miệng' as any, oldValue: `[${currentGrade.oral.join(', ')}]`, newValue: `[${newOral.join(', ')}]` });
-                currentGrade.oral = newOral.filter((v): v is number => v !== null && v !== undefined);
+            // Handle TX1-TX4: Individual tracking
+            const parseNum = (v: string) => { 
+              if (v === undefined || v === null) return undefined;
+              const n = parseFloat(v.replace(',', '.')); 
+              return (!isNaN(n) && n >= 0 && n <= 10) ? n : null; 
+            };
+            
+            const newOral = [...currentGrade.oral];
+            const newM15 = [...currentGrade.m15];
+            
+            const txConfigs = [
+              { key: 'tx1', array: newOral, idx: 0, label: 'TX1' },
+              { key: 'tx2', array: newOral, idx: 1, label: 'TX2' },
+              { key: 'tx3', array: newM15, idx: 0, label: 'TX3' },
+              { key: 'tx4', array: newM15, idx: 1, label: 'TX4' },
+            ];
+            
+            txConfigs.forEach(conf => {
+              if (edits[conf.key] !== undefined) {
+                const oldV = conf.array[conf.idx];
+                const newV = parseNum(edits[conf.key]);
+                
+                const oldStr = (oldV === undefined || oldV === null) ? 'Trống' : String(oldV);
+                const newStr = (newV === null || newV === undefined) ? 'Trống' : String(newV);
+                
+                if (oldStr !== newStr) {
+                  if (newV !== null && newV !== undefined) {
+                    conf.array[conf.idx] = newV;
+                  } else {
+                    // If newVal is null (cleared), remove it
+                    if (conf.array.length > conf.idx) {
+                      conf.array.splice(conf.idx, 1);
+                    }
+                  }
+                  
+                  newHistory.unshift({
+                    id: Math.random().toString(36).substr(2, 9),
+                    studentId,
+                    timestamp,
+                    type: conf.label as any,
+                    oldValue: oldStr,
+                    newValue: newStr
+                  });
+                }
               }
-              if (JSON.stringify(newM15) !== JSON.stringify(currentGrade.m15)) {
-                newHistory.unshift({ id: Math.random().toString(36).substr(2,9), studentId, timestamp, type: '15 Phút' as any, oldValue: `[${currentGrade.m15.join(', ')}]`, newValue: `[${newM15.join(', ')}]` });
-                currentGrade.m15 = newM15.filter((v): v is number => v !== null && v !== undefined);
-              }
-            } else {
-              processField('oral', 'Miệng', true);
-              processField('m15', '15 Phút', true);
-            }
+            });
+            
+            currentGrade.oral = newOral.filter((v): v is number => v !== null && v !== undefined);
+            currentGrade.m15 = newM15.filter((v): v is number => v !== null && v !== undefined);
             processField('h1', 'Giữa Kỳ', true);
             processField('semester', 'Cuối Kỳ', false);
 
@@ -596,26 +622,11 @@ export default function App() {
 
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
 
-    // 2. Sheet Phân tích AI riêng biệt
-    const aiTitle = [["BÁO CÁO PHÂN TÍCH CHI TIẾT AI"]];
-    const aiHeaders = ['STT', 'Họ và Tên', 'Nội dung phân tích'];
-    const aiData = classStudents.map((s, idx) => {
-      const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
-      return [
-        idx + 1,
-        s.name,
-        stripAiSpecialChars(g?.aiAnalysis || "Chưa có dữ liệu phân tích AI.")
-      ];
-    });
-    const wsAi = XLSX.utils.aoa_to_sheet([...aiTitle, [], aiHeaders, ...aiData]);
-    wsAi['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 120 }];
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Bảng điểm & Thống kê");
-    XLSX.utils.book_append_sheet(wb, wsAi, "Phân tích AI");
     
     XLSX.writeFile(wb, `BaoCao_SmartGrade_${activeClass.name}_${selectedYear}.xlsx`);
-    Swal.fire('Thành công', 'Đã xuất file Excel đầy đủ bảng điểm và thống kê!', 'success');
+    Swal.fire('Thành công', 'Đã xuất file Excel bảng điểm và thống kê!', 'success');
   };
 
   const handlePasteStudents = () => {
