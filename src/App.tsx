@@ -26,7 +26,7 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
-import { AppData, Grade, Student } from './types';
+import { AppData, Grade, Student, HistoryRecord } from './types';
 import { callGeminiAI, PROMPTS } from './lib/gemini';
 import {
   Chart as ChartJS,
@@ -51,9 +51,9 @@ ChartJS.register(
 );
 
 // --- Constants internalized to avoid build export issues ---
-const AVAILABLE_YEARS = ['2023-2024', '2024-2025', '2025-2026', '2026-2027'];
+const DEFAULT_YEARS = ['2023-2024', '2024-2025', '2025-2026', '2026-2027'];
 const AVAILABLE_SEMESTERS = [{id: 'HK1', name: 'Học kỳ I'}, {id: 'HK2', name: 'Học kỳ II'}, {id: 'CN', name: 'Cả năm'}];
-const DEFAULT_SUBJECTS = ['Toán', 'Ngữ văn', 'Ngoại ngữ', 'Vật lý', 'Hóa học', 'Sinh học', 'Lịch sử', 'Địa lý', 'GDCD', 'Tin học', 'Công nghệ', 'Thể dục', 'Nghệ thuật', 'HĐTN, HN', 'GDKT & PL'];
+const DEFAULT_SUBJECTS = ['Toán', 'Ngữ văn', 'Ngoại ngữ', 'Vật lý', 'Hóa học', 'Sinh học', 'KHTN', 'Lịch sử', 'Địa lý', 'LS&ĐL', 'GDCD', 'Tin học', 'Công nghệ', 'Thể dục', 'Nghệ thuật', 'HĐTN, HN', 'GDKT & PL'];
 
 const SCORE_WEIGHTS = {
   oral: 1,
@@ -97,7 +97,8 @@ const INITIAL_DATA: AppData = {
   settings: {
     geminiApiKey: '',
     modelName: 'gemini-1.5-flash',
-    theme: 'light'
+    theme: 'light',
+    schoolYears: DEFAULT_YEARS
   }
 };
 
@@ -169,10 +170,14 @@ export default function App() {
           parsed.grades = newGrades;
         }
       }
-      return { ...INITIAL_DATA, ...parsed, settings: { ...INITIAL_DATA.settings, ...(parsed.settings || {}) } };
+      const mergedSettings = { ...INITIAL_DATA.settings, ...(parsed.settings || {}) };
+      if (!mergedSettings.schoolYears) mergedSettings.schoolYears = DEFAULT_YEARS;
+      return { ...INITIAL_DATA, ...parsed, settings: mergedSettings };
     }
     return INITIAL_DATA;
   });
+
+  const availableYears = data.settings.schoolYears || DEFAULT_YEARS;
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'grading' | 'settings' | 'history'>('dashboard');
   const [selectedClassId, setSelectedClassId] = useState<string>(data.classes[0]?.id || '');
@@ -180,12 +185,15 @@ export default function App() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
 
-  const [selectedYear, setSelectedYear] = useState('2023-2024');
+  const [selectedYear, setSelectedYear] = useState(availableYears[availableYears.length - 1]);
   const [selectedSemester, setSelectedSemester] = useState('HK1');
   const [selectedSubject, setSelectedSubject] = useState('Toán');
   const [showRankId, setShowRankId] = useState<string | null>(null);
 
   const [draftGrades, setDraftGrades] = useState<Record<string, Record<string, string>>>({});
+  const [historyFilterYear, setHistoryFilterYear] = useState('');
+  const [historyFilterClass, setHistoryFilterClass] = useState('');
+  const [historyFilterSemester, setHistoryFilterSemester] = useState('');
 
   useEffect(() => {
     setDraftGrades({});
@@ -283,8 +291,29 @@ export default function App() {
               }
             };
 
-            processField('oral', 'Miệng', true);
-            processField('m15', '15 Phút', true);
+            // Handle TX1-TX4: tx1,tx2 -> oral[0,1]; tx3,tx4 -> m15[0,1]
+            const txFields = ['tx1', 'tx2', 'tx3', 'tx4'];
+            const hasTx = txFields.some(f => edits[f] !== undefined);
+            if (hasTx) {
+              const parseNum = (v: string) => { const n = parseFloat(v.replace(',', '.')); return (!isNaN(n) && n >= 0 && n <= 10) ? n : null; };
+              const newOral = [...currentGrade.oral];
+              const newM15 = [...currentGrade.m15];
+              if (edits.tx1 !== undefined) { const v = parseNum(edits.tx1); if (v !== null) newOral[0] = v; else newOral.splice(0, 1); }
+              if (edits.tx2 !== undefined) { const v = parseNum(edits.tx2); if (v !== null) newOral[1] = v; else newOral.splice(1, 1); }
+              if (edits.tx3 !== undefined) { const v = parseNum(edits.tx3); if (v !== null) newM15[0] = v; else newM15.splice(0, 1); }
+              if (edits.tx4 !== undefined) { const v = parseNum(edits.tx4); if (v !== null) newM15[1] = v; else newM15.splice(1, 1); }
+              if (JSON.stringify(newOral) !== JSON.stringify(currentGrade.oral)) {
+                newHistory.unshift({ id: Math.random().toString(36).substr(2,9), studentId, timestamp, type: 'Miệng' as any, oldValue: `[${currentGrade.oral.join(', ')}]`, newValue: `[${newOral.join(', ')}]` });
+                currentGrade.oral = newOral.filter((v): v is number => v !== null && v !== undefined);
+              }
+              if (JSON.stringify(newM15) !== JSON.stringify(currentGrade.m15)) {
+                newHistory.unshift({ id: Math.random().toString(36).substr(2,9), studentId, timestamp, type: '15 Phút' as any, oldValue: `[${currentGrade.m15.join(', ')}]`, newValue: `[${newM15.join(', ')}]` });
+                currentGrade.m15 = newM15.filter((v): v is number => v !== null && v !== undefined);
+              }
+            } else {
+              processField('oral', 'Miệng', true);
+              processField('m15', '15 Phút', true);
+            }
             processField('h1', 'Giữa Kỳ', true);
             processField('semester', 'Cuối Kỳ', false);
 
@@ -810,7 +839,6 @@ export default function App() {
                     title: 'Thêm lớp học mới',
                     html: `
                       <input id="swal-class-name" class="swal2-input" placeholder="Tên lớp (VD: 9A1)">
-                      <input id="swal-class-subject" class="swal2-input" placeholder="Môn học (VD: Toán học)">
                     `,
                     focusConfirm: false,
                     showCancelButton: true,
@@ -818,18 +846,17 @@ export default function App() {
                     cancelButtonText: 'Hủy',
                     preConfirm: () => {
                       const name = (document.getElementById('swal-class-name') as HTMLInputElement).value;
-                      const subject = (document.getElementById('swal-class-subject') as HTMLInputElement).value;
-                      if (!name || !subject) {
-                        Swal.showValidationMessage('Vui lòng nhập đầy đủ tên lớp và môn học');
+                      if (!name) {
+                        Swal.showValidationMessage('Vui lòng nhập tên lớp');
                       }
-                      return { name, subject };
+                      return { name };
                     }
                   }).then((result) => {
                     if (result.isConfirmed) {
                       const newId = Math.random().toString(36).substr(2, 9);
                       setData(prev => ({
                         ...prev,
-                        classes: [...prev.classes, { id: newId, name: result.value.name, subject: result.value.subject }],
+                        classes: [...prev.classes, { id: newId, name: result.value.name, subject: '' }],
                         students: { ...prev.students, [newId]: [] },
                         grades: { ...prev.grades, [newId]: [] }
                       }));
@@ -853,9 +880,8 @@ export default function App() {
                   >
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full shrink-0 ${selectedClassId === cls.id ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
-                      <span className="truncate max-w-[80px]">{cls.name}</span>
+                      <span className="truncate">{cls.name}</span>
                     </div>
-                    <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md truncate max-w-[60px]">{cls.subject}</span>
                   </button>
                   {selectedClassId === cls.id && (
                     <button
@@ -865,7 +891,6 @@ export default function App() {
                           title: 'Chỉnh sửa lớp học',
                           html: `
                             <input id="swal-edit-name" class="swal2-input" value="${cls.name}" placeholder="Tên lớp">
-                            <input id="swal-edit-subject" class="swal2-input" value="${cls.subject}" placeholder="Môn học">
                           `,
                           showCancelButton: true,
                           showDenyButton: true,
@@ -875,15 +900,14 @@ export default function App() {
                           denyButtonColor: '#ef4444',
                           preConfirm: () => {
                             const name = (document.getElementById('swal-edit-name') as HTMLInputElement).value;
-                            const subject = (document.getElementById('swal-edit-subject') as HTMLInputElement).value;
-                            if (!name || !subject) Swal.showValidationMessage('Vui lòng nhập đầy đủ');
-                            return { name, subject };
+                            if (!name) Swal.showValidationMessage('Vui lòng nhập tên lớp');
+                            return { name };
                           }
                         }).then((result) => {
                           if (result.isConfirmed) {
                             setData(prev => ({
                               ...prev,
-                              classes: prev.classes.map(c => c.id === cls.id ? { ...c, name: result.value.name, subject: result.value.subject } : c)
+                              classes: prev.classes.map(c => c.id === cls.id ? { ...c, name: result.value.name } : c)
                             }));
                           } else if (result.isDenied) {
                             Swal.fire({
@@ -1006,7 +1030,7 @@ export default function App() {
                     onChange={e => setSelectedYear(e.target.value)}
                     className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
-                    {AVAILABLE_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>
                 
@@ -1125,8 +1149,10 @@ export default function App() {
                     <thead>
                       <tr className="bg-slate-50/80 border-b border-slate-200">
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Miệng</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">15 Phút</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX1</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX2</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX3</th>
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX4</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Giữa Kỳ (x2)</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Cuối Kỳ (x3)</th>
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30">Cộng (+)</th>
@@ -1206,22 +1232,44 @@ export default function App() {
                                 </div>
                               </div>
                             </td>
-                            {/* Điểm Miệng */}
-                            <td className="px-6 py-4 text-center">
+                            {/* TX1 */}
+                            <td className="px-3 py-4 text-center">
                               <input 
                                 type="text"
-                                value={draftGrades[student.id]?.oral !== undefined ? draftGrades[student.id].oral : grade.oral.join(' ')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), oral: e.target.value } }))}
-                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.oral !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                                placeholder="-"
+                                value={draftGrades[student.id]?.tx1 !== undefined ? draftGrades[student.id].tx1 : (grade.oral[0] ?? '')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx1: e.target.value } }))}
+                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
                               />
                             </td>
-                            {/* Điểm 15P */}
-                            <td className="px-6 py-4 text-center">
+                            {/* TX2 */}
+                            <td className="px-3 py-4 text-center">
                               <input 
                                 type="text"
-                                value={draftGrades[student.id]?.m15 !== undefined ? draftGrades[student.id].m15 : grade.m15.join(' ')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), m15: e.target.value } }))}
-                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.m15 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                                placeholder="-"
+                                value={draftGrades[student.id]?.tx2 !== undefined ? draftGrades[student.id].tx2 : (grade.oral[1] ?? '')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx2: e.target.value } }))}
+                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx2 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                              />
+                            </td>
+                            {/* TX3 */}
+                            <td className="px-3 py-4 text-center">
+                              <input 
+                                type="text"
+                                placeholder="-"
+                                value={draftGrades[student.id]?.tx3 !== undefined ? draftGrades[student.id].tx3 : (grade.m15[0] ?? '')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx3: e.target.value } }))}
+                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx3 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                              />
+                            </td>
+                            {/* TX4 */}
+                            <td className="px-3 py-4 text-center">
+                              <input 
+                                type="text"
+                                placeholder="-"
+                                value={draftGrades[student.id]?.tx4 !== undefined ? draftGrades[student.id].tx4 : (grade.m15[1] ?? '')}
+                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx4: e.target.value } }))}
+                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx4 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
                               />
                             </td>
                             {/* Giữa kỳ */}
@@ -1437,17 +1485,54 @@ export default function App() {
               className="space-y-6"
             >
               <div className="bg-white rounded-3xl border border-slate-200 card-shadow overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                    <Clock size={20} className="text-blue-500" />
-                    Lịch sử chỉnh sửa điểm
-                  </h3>
-                  <button 
-                    onClick={() => setData(prev => ({ ...prev, history: [] }))}
-                    className="text-xs text-rose-500 font-bold hover:underline"
-                  >
-                    Xóa nhật ký
-                  </button>
+                <div className="p-6 border-b border-slate-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                      <Clock size={20} className="text-blue-500" />
+                      Lịch sử chỉnh sửa điểm
+                    </h3>
+                    <button 
+                      onClick={() => setData(prev => ({ ...prev, history: [] }))}
+                      className="text-xs text-rose-500 font-bold hover:underline"
+                    >
+                      Xóa nhật ký
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-500">Năm học:</label>
+                      <select
+                        value={historyFilterYear}
+                        onChange={e => setHistoryFilterYear(e.target.value)}
+                        className="border border-slate-200 rounded-lg px-2 py-1 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        <option value="">Tất cả</option>
+                        {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-500">Lớp:</label>
+                      <select
+                        value={historyFilterClass}
+                        onChange={e => setHistoryFilterClass(e.target.value)}
+                        className="border border-slate-200 rounded-lg px-2 py-1 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        <option value="">Tất cả</option>
+                        {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-500">Kỳ:</label>
+                      <select
+                        value={historyFilterSemester}
+                        onChange={e => setHistoryFilterSemester(e.target.value)}
+                        className="border border-slate-200 rounded-lg px-2 py-1 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        <option value="">Tất cả</option>
+                        {AVAILABLE_SEMESTERS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
@@ -1463,9 +1548,33 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100">
                       {(() => {
                         const allStudents = Object.values(data.students).flat() as Student[];
+                        // Students belonging to selected class filter
+                        const classStudentIds = historyFilterClass
+                          ? new Set((data.students[historyFilterClass] || []).map(s => s.id))
+                          : null;
                         const filteredHistory = data.history.filter(h => {
                           const studentName = allStudents.find(s => s.id === h.studentId)?.name || '';
-                          return studentName.toLowerCase().includes(searchQuery.toLowerCase());
+                          const nameMatch = studentName.toLowerCase().includes(searchQuery.toLowerCase());
+                          const classMatch = !classStudentIds || classStudentIds.has(h.studentId);
+                          // Year/semester filter: check gradeKey entries that match
+                          let yearMatch = true;
+                          let semesterMatch = true;
+                          if (historyFilterYear || historyFilterSemester) {
+                            const relevantKeys = Object.keys(data.grades).filter(k => {
+                              const parts = k.split('_');
+                              if (parts.length < 4) return false;
+                              const [yr, sem, , clsId] = parts;
+                              return (!historyFilterYear || yr === historyFilterYear) &&
+                                     (!historyFilterSemester || sem === historyFilterSemester) &&
+                                     (!historyFilterClass || clsId === historyFilterClass);
+                            });
+                            const relevantStudentIds = new Set(
+                              relevantKeys.flatMap(k => (data.grades[k] || []).map(g => g.studentId))
+                            );
+                            yearMatch = relevantStudentIds.has(h.studentId);
+                            semesterMatch = true; // already factored in above
+                          }
+                          return nameMatch && classMatch && yearMatch && semesterMatch;
                         });
 
                         const latestHistoryMap = new Map<string, HistoryRecord>();
@@ -1710,6 +1819,57 @@ export default function App() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4 mt-6">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CalendarCheck className="text-blue-500" size={20} />
+                      <h4 className="font-bold text-slate-900">Quản lý Năm học</h4>
+                    </div>
+                    <p className="text-xs text-slate-500">Thêm năm học mới bắt đầu từ 2026-2027 trở đi</p>
+                    <div className="flex flex-wrap gap-2">
+                      {availableYears.map(year => (
+                        <div key={year} className="flex items-center gap-1 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-medium">
+                          <span>{year}</span>
+                          {!DEFAULT_YEARS.includes(year) && (
+                            <button
+                              onClick={() => setData(prev => ({ ...prev, settings: { ...prev.settings, schoolYears: (prev.settings.schoolYears || DEFAULT_YEARS).filter(y => y !== year) } }))}
+                              className="ml-1 text-rose-400 hover:text-rose-600"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        onClick={async () => {
+                          const { value: yr } = await Swal.fire({
+                            title: 'Thêm năm học mới',
+                            input: 'text',
+                            inputLabel: 'Định dạng YYYY-YYYY (từ 2026-2027 trở đi)',
+                            inputPlaceholder: 'VD: 2026-2027',
+                            showCancelButton: true,
+                            confirmButtonText: 'Thêm',
+                            cancelButtonText: 'Hủy',
+                            inputValidator: (v) => {
+                              if (!v || !/^\d{4}-\d{4}$/.test(v)) return 'Sai định dạng YYYY-YYYY';
+                              const startY = parseInt(v.split('-')[0]);
+                              if (startY < 2026) return 'Chỉ thêm từ năm 2026-2027 trở đi';
+                              if (availableYears.includes(v)) return 'Năm học này đã tồn tại';
+                            }
+                          });
+                          if (yr) {
+                            setData(prev => ({
+                              ...prev,
+                              settings: { ...prev.settings, schoolYears: [...(prev.settings.schoolYears || DEFAULT_YEARS), yr].sort() }
+                            }));
+                          }
+                        }}
+                        className="flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-100 transition-all"
+                      >
+                        <Plus size={14} /> Thêm năm
+                      </button>
                     </div>
                   </div>
 
