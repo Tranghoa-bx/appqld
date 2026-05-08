@@ -327,7 +327,7 @@ export default function App() {
             else if (net < 0) suggestion = 'Cần cố gắng';
             
             const newRecord = {
-              month: \`Tháng \${currentMonth}\`,
+              month: `Tháng ${currentMonth}`,
               bonus: grade.bonusTotal || 0,
               penalty: grade.penaltyTotal || 0,
               net,
@@ -938,19 +938,19 @@ export default function App() {
                                     if (mHistory.length === 0) {
                                       Swal.fire('Thông báo', 'Học sinh này chưa có dữ liệu chốt kỳ nào.', 'info');
                                     } else {
-                                      const tableRows = mHistory.map(h => \`
+                                      const tableRows = mHistory.map(h => `
                                         <tr class="border-b">
-                                          <td class="p-2 text-left">\${h.month}</td>
-                                          <td class="p-2 text-emerald-600 font-bold">+\${h.bonus}</td>
-                                          <td class="p-2 text-rose-600 font-bold">-\${h.penalty}</td>
-                                          <td class="p-2 font-black \${h.net > 0 ? 'text-emerald-600' : h.net < 0 ? 'text-rose-600' : 'text-slate-500'}">\${h.net > 0 ? '+' : ''}\${h.net}</td>
-                                          <td class="p-2 text-sm">\${h.suggestion}</td>
+                                          <td class="p-2 text-left">${h.month}</td>
+                                          <td class="p-2 text-emerald-600 font-bold">+${h.bonus}</td>
+                                          <td class="p-2 text-rose-600 font-bold">-${h.penalty}</td>
+                                          <td class="p-2 font-black ${h.net > 0 ? 'text-emerald-600' : h.net < 0 ? 'text-rose-600' : 'text-slate-500'}">${h.net > 0 ? '+' : ''}${h.net}</td>
+                                          <td class="p-2 text-sm">${h.suggestion}</td>
                                         </tr>
-                                      \`).join('');
+                                      `).join('');
                                       
                                       Swal.fire({
-                                        title: \`Lịch sử chốt kỳ: \${student.name}\`,
-                                        html: \`
+                                        title: `Lịch sử chốt kỳ: ${student.name}`,
+                                        html: `
                                           <div class="max-h-[60vh] overflow-y-auto">
                                             <table class="w-full text-sm">
                                               <thead class="bg-slate-50 sticky top-0">
@@ -963,11 +963,11 @@ export default function App() {
                                                 </tr>
                                               </thead>
                                               <tbody>
-                                                \${tableRows}
+                                                ${tableRows}
                                               </tbody>
                                             </table>
                                           </div>
-                                        \`,
+                                        `,
                                         width: '600px',
                                         confirmButtonText: 'Đóng'
                                       });
@@ -1049,7 +1049,7 @@ export default function App() {
                           }
                         }).then(res => {
                           if (res.isConfirmed) {
-                            const newId = \`s_\${Date.now()}\`;
+                            const newId = `s_${Date.now()}`;
                             setData(prev => ({
                               ...prev,
                               students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), { id: newId, name: res.value.name, gender: res.value.gender }] },
