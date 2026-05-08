@@ -26,7 +26,6 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
-import { INITIAL_DATA, AVAILABLE_YEARS, AVAILABLE_SEMESTERS, DEFAULT_SUBJECTS, SCORE_WEIGHTS } from './constants';
 import { AppData, Grade, Student } from './types';
 import { callGeminiAI, PROMPTS } from './lib/gemini';
 import {
@@ -40,6 +39,67 @@ import {
   ArcElement
 } from 'chart.js';
 import { Bar, Pie } from 'react-chartjs-2';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement
+);
+
+// --- Constants internalized to avoid build export issues ---
+const AVAILABLE_YEARS = ['2023-2024', '2024-2025', '2025-2026', '2026-2027'];
+const AVAILABLE_SEMESTERS = [{id: 'HK1', name: 'Học kỳ I'}, {id: 'HK2', name: 'Học kỳ II'}, {id: 'CN', name: 'Cả năm'}];
+const DEFAULT_SUBJECTS = ['Toán', 'Ngữ văn', 'Ngoại ngữ', 'Vật lý', 'Hóa học', 'Sinh học', 'Lịch sử', 'Địa lý', 'GDCD', 'Tin học', 'Công nghệ', 'Thể dục', 'Nghệ thuật', 'HĐTN, HN', 'GDKT & PL'];
+
+const SCORE_WEIGHTS = {
+  oral: 1,
+  m15: 1,
+  h1: 2,
+  semester: 3
+};
+
+const INITIAL_DATA: AppData = {
+  classes: [
+    { id: '9a1', name: 'Lớp 9A1', subject: 'Toán học' },
+    { id: '9a2', name: 'Lớp 9A2', subject: 'Ngữ văn' },
+  ],
+  students: {
+    '9a1': [
+      { id: 's1', name: 'Nguyễn Văn An', gender: 'Nam', birthday: '2010-05-15' },
+      { id: 's2', name: 'Trần Thị Bình', gender: 'Nữ', birthday: '2010-08-20' },
+      { id: 's3', name: 'Lê Hoàng Long', gender: 'Nam', birthday: '2010-12-01' },
+      { id: 's4', name: 'Phạm Minh Châu', gender: 'Nữ', birthday: '2010-02-12' },
+      { id: 's5', name: 'Hoàng Quốc Việt', gender: 'Nam', birthday: '2010-07-30' },
+    ],
+    '9a2': [
+      { id: 's6', name: 'Đặng Thùy Chi', gender: 'Nữ', birthday: '2010-03-05' },
+      { id: 's7', name: 'Vũ Minh Đức', gender: 'Nam', birthday: '2010-10-10' },
+    ]
+  },
+  grades: {
+    '9a1': [
+      { studentId: 's1', oral: [8, 9], m15: [7], h1: [8.5], semester: 8, bonusTotal: 0.5, penaltyTotal: 0 },
+      { studentId: 's2', oral: [7, 6], m15: [8], h1: [7.5], semester: 9, bonusTotal: 0, penaltyTotal: 0.5 },
+      { studentId: 's3', oral: [9], m15: [9, 10], h1: [9], semester: 9.5, bonusTotal: 1.0, penaltyTotal: 0 },
+      { studentId: 's4', oral: [5, 6], m15: [6], h1: [5.5], semester: 6, bonusTotal: 0, penaltyTotal: 1.0 },
+      { studentId: 's5', oral: [8], m15: [7], h1: [7], semester: null, bonusTotal: 0.25, penaltyTotal: 0.25 },
+    ],
+    '9a2': [
+      { studentId: 's6', oral: [9], m15: [9], h1: [8], semester: 8.5, bonusTotal: 0.5, penaltyTotal: 0 },
+      { studentId: 's7', oral: [4], m15: [5, 4], h1: [6], semester: null, bonusTotal: 0, penaltyTotal: 1.5 },
+    ]
+  },
+  history: [],
+  settings: {
+    geminiApiKey: '',
+    modelName: 'gemini-1.5-flash',
+    theme: 'light'
+  }
+};
 
 ChartJS.register(
   CategoryScale,
