@@ -62,6 +62,19 @@ const SCORE_WEIGHTS = {
   semester: 3
 };
 
+const stripAiSpecialChars = (text: string) => {
+  if (!text) return "";
+  return text
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/#/g, "")
+    .replace(/> /g, "")
+    .replace(/- /g, "• ")
+    .replace(/\[/g, "(")
+    .replace(/\]/g, ")")
+    .trim();
+};
+
 const INITIAL_DATA: AppData = {
   classes: [
     { id: '9a1', name: 'Lớp 9A1', subject: 'Toán học' },
@@ -484,10 +497,66 @@ export default function App() {
     });
   };
 
+  const exportToWord = () => {
+    if (!activeClass || classStudents.length === 0) return;
+    
+    const htmlHeader = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head><meta charset='utf-8'><title>Báo cáo Phân tích AI</title>
+      <style>
+        body { font-family: 'Times New Roman', serif; line-height: 1.6; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .student-section { margin-bottom: 40px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+        .student-name { font-size: 16pt; font-bold; color: #1e3a8a; }
+        .analysis-content { font-size: 12pt; text-align: justify; }
+        .footer { font-size: 10pt; color: #666; margin-top: 50px; text-align: right; }
+      </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1 style="margin-bottom: 5px;">BÁO CÁO PHÂN TÍCH HỌC TẬP THÔNG MINH</h1>
+          <p>Lớp: ${activeClass.name} | Học kỳ: ${selectedSemester} | Năm học: ${selectedYear}</p>
+          <hr/>
+        </div>
+    `;
+
+    const sections = classStudents.map(s => {
+      const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
+      const cleanedAnalysis = stripAiSpecialChars(g?.aiAnalysis || "Chưa có dữ liệu phân tích AI cho học sinh này.");
+      return `
+        <div class="student-section">
+          <div class="student-name">Học sinh: ${s.name}</div>
+          <div class="analysis-content">
+            ${cleanedAnalysis.replace(/\n/g, '<br/>')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const htmlFooter = `
+        <div class="footer">
+          <p>Ngày xuất: ${dayjs().format('DD/MM/YYYY HH:mm')}</p>
+          <p>Giáo viên: ${data.settings.teacherName || '...'}</p>
+        </div>
+      </body></html>
+    `;
+
+    const fullHtml = htmlHeader + sections + htmlFooter;
+    const blob = new Blob(['\ufeff', fullHtml], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `BaoCao_AI_${activeClass.name}_${dayjs().format('YYYYMMDD')}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    Swal.fire('Thành công', 'Đã xuất file Word báo cáo AI!', 'success');
+  };
+
   const exportExcel = () => {
     if (!activeClass) return;
     
-    // 1. Tạo sheet Báo cáo điểm
+    // 1. Tạo sheet Bảng điểm chi tiết
     const title = [["BÁO CÁO KẾT QUẢ HỌC TẬP"]];
     const info = [
       [`Lớp: ${activeClass.name}`, `Năm học: ${selectedYear}`, `Học kỳ: ${selectedSemester === 'CN' ? 'Cả năm' : selectedSemester}`, `Môn: ${selectedSubject}`],
@@ -499,9 +568,9 @@ export default function App() {
     let tableData: any[][] = [];
 
     if (selectedSemester === 'CN') {
-      tableHeaders = ['STT', 'Họ và Tên', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Xếp hạng', 'Xếp loại'];
+      tableHeaders = ['STT', 'Họ và Tên', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Hạng', 'Xếp loại', 'Nhận xét (AI)'];
       tableData = classStudents.map((s, idx) => {
-        const rowNum = idx + 6; // Dữ liệu bắt đầu từ dòng 6 trong Excel
+        const rowNum = idx + 6;
         const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
         const hk2Key = `${selectedYear}_HK2_${selectedSubject}_${selectedClassId}`;
         const hk1Grade = (data.grades[hk1Key] || []).find(g => g.studentId === s.id);
@@ -509,6 +578,8 @@ export default function App() {
         const avg1 = hk1Grade ? calculateAverage(hk1Grade) : 0;
         const avg2 = hk2Grade ? calculateAverage(hk2Grade) : 0;
         const hasGrade = avg1 > 0 || avg2 > 0;
+        const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
+        const cnAvg = hasGrade ? Math.round(((avg1 + avg2 * 2) / 3) * 10) / 10 : 0;
         
         return [
           idx + 1,
@@ -517,14 +588,16 @@ export default function App() {
           avg2 || 0,
           { f: `ROUND((C${rowNum}+D${rowNum}*2)/3,1)` },
           hasGrade ? cnRanks[s.id] : '',
-          '' // Xếp loại sẽ được điền sau hoặc dùng công thức if lồng nhau
+          hasGrade ? getRank(cnAvg).label : '',
+          stripAiSpecialChars(g?.aiAnalysis || "").substring(0, 70)
         ];
       });
     } else {
-      tableHeaders = ['STT', 'Họ và Tên', 'TX1', 'TX2', 'TX3', 'TX4', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng (+)', 'Trừ (-)', 'ĐTB'];
+      tableHeaders = ['STT', 'Họ và Tên', 'TX1', 'TX2', 'TX3', 'TX4', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng (+)', 'Trừ (-)', 'ĐTB', 'Hạng', 'Xếp loại', 'Nhận xét (AI)'];
       tableData = classStudents.map((s, idx) => {
         const rowNum = idx + 6;
         const g = classGrades.find(grade => grade.studentId === s.id);
+        const avg = g ? calculateAverage(g) : 0;
         return [
           idx + 1,
           s.name,
@@ -536,22 +609,38 @@ export default function App() {
           g?.semester ?? 0,
           g?.bonusTotal || 0,
           g?.penaltyTotal || 0,
-          { f: `ROUND((C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}+G${rowNum}*2+H${rowNum}*3)/9,1)` }
+          { f: `ROUND((C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}+G${rowNum}*2+H${rowNum}*3)/9,1)` },
+          avg > 0 ? normalRanks[s.id] : '',
+          avg > 0 ? getRank(avg).label : '',
+          stripAiSpecialChars(g?.aiAnalysis || "").substring(0, 70)
         ];
       });
     }
 
     const wsData = [...title, ...info, tableHeaders, ...tableData];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-    // Cấu hình độ rộng cột
-    ws['!cols'] = selectedSemester === 'CN' 
-      ? [{ wch: 5 }, { wch: 25 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 12 }]
-      : [{ wch: 5 }, { wch: 25 }, { wch: 6 }, { wch: 6 }, { wch: 6 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
-
+    ws['!cols'] = [
+      { wch: 5 }, { wch: 25 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, 
+      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, 
+      { wch: 8 }, { wch: 12 }, { wch: 40 }
+    ];
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
 
-    // 2. Tạo sheet Phân tích AI riêng
+    // 2. Tạo sheet Thống kê & Biểu đồ (Dữ liệu nguồn)
+    const statTitle = [["THỐNG KÊ TỔNG HỢP HỌC LỰC"]];
+    const statHeaders = ['Loại', 'Số lượng', 'Tỷ lệ (%)'];
+    const statData = [
+      ['Giỏi (8.0 - 10)', stats.gioi, `${Math.round((stats.gioi/stats.total)*100) || 0}%`],
+      ['Khá (6.5 - 7.9)', stats.kha, `${Math.round((stats.kha/stats.total)*100) || 0}%`],
+      ['Trung bình (5.0 - 6.4)', stats.tb, `${Math.round((stats.tb/stats.total)*100) || 0}%`],
+      ['Yếu (< 5.0)', stats.yeu, `${Math.round((stats.yeu/stats.total)*100) || 0}%`],
+      [],
+      ['Tổng số học sinh', stats.total, '100%']
+    ];
+    const wsStat = XLSX.utils.aoa_to_sheet([...statTitle, [], statHeaders, ...statData]);
+    wsStat['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }];
+
+    // 3. Tạo sheet Phân tích AI riêng
     const aiTitle = [["BÁO CÁO PHÂN TÍCH CHI TIẾT AI"]];
     const aiHeaders = ['STT', 'Họ và Tên', 'Nội dung phân tích'];
     const aiData = classStudents.map((s, idx) => {
@@ -559,19 +648,19 @@ export default function App() {
       return [
         idx + 1,
         s.name,
-        g?.aiAnalysis || "Chưa có dữ liệu phân tích."
+        stripAiSpecialChars(g?.aiAnalysis || "Chưa có dữ liệu phân tích AI.")
       ];
     });
-
     const wsAi = XLSX.utils.aoa_to_sheet([...aiTitle, [], aiHeaders, ...aiData]);
-    wsAi['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 100 }];
+    wsAi['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 120 }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Bảng điểm");
+    XLSX.utils.book_append_sheet(wb, wsStat, "Thống kê");
     XLSX.utils.book_append_sheet(wb, wsAi, "Phân tích AI");
     
-    XLSX.writeFile(wb, `${activeClass.name}_KetQua_${selectedYear}_${selectedSemester}.xlsx`);
-    Swal.fire('Thành công', 'Đã xuất file Excel kèm công thức và phân tích AI!', 'success');
+    XLSX.writeFile(wb, `BaoCao_SmartGrade_${activeClass.name}_${selectedYear}.xlsx`);
+    Swal.fire('Thành công', 'Đã xuất file Excel đầy đủ bảng điểm và thống kê!', 'success');
   };
 
   const handlePasteStudents = () => {
@@ -1111,8 +1200,12 @@ export default function App() {
                   <ClipboardList size={18} />
                   <span className="hidden sm:inline">Dán danh sách</span>
                 </button>
-                <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
+                <button onClick={exportToWord} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
                   <Download size={18} />
+                  <span className="hidden sm:inline">Xuất Word (AI)</span>
+                </button>
+                <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
+                  <Upload size={18} />
                   <span className="hidden sm:inline">Xuất Excel</span>
                 </button>
               </>
@@ -1860,6 +1953,54 @@ export default function App() {
                 </div>
                 <div className="absolute top-0 right-0 p-8 opacity-10">
                   <GraduationCap size={160} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-8 mt-8">
+                <div className="bg-white p-6 rounded-3xl border border-slate-100 card-shadow overflow-hidden">
+                   <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                    <Users size={20} className="text-blue-500" />
+                    Bảng xếp hạng lớp: {activeClass?.name}
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-widest border-b border-slate-100">
+                          <th className="px-6 py-4 text-center w-20">Hạng</th>
+                          <th className="px-6 py-4">Học sinh</th>
+                          <th className="px-6 py-4 text-center">ĐTB</th>
+                          <th className="px-6 py-4 text-center">Xếp loại</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {[...classStudents].map(s => {
+                          const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
+                          const avg = g ? calculateAverage(g) : 0;
+                          return { ...s, avg };
+                        }).sort((a, b) => b.avg - a.avg).map((s, idx) => {
+                          const rank = getRank(s.avg);
+                          return (
+                            <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className={`mx-auto w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${idx === 0 ? 'bg-amber-100 text-amber-600' : idx === 1 ? 'bg-slate-100 text-slate-600' : idx === 2 ? 'bg-orange-50 text-orange-600' : 'text-slate-400'}`}>
+                                  {idx + 1}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 font-bold text-slate-900">{s.name}</td>
+                              <td className="px-6 py-4 text-center font-bold text-blue-600 text-lg">{s.avg > 0 ? s.avg : '-'}</td>
+                              <td className="px-6 py-4 text-center">
+                                {s.avg > 0 ? (
+                                  <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${rank.bg} ${rank.color}`}>
+                                    {rank.label}
+                                  </span>
+                                ) : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </motion.div>
