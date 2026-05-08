@@ -51,7 +51,7 @@ ChartJS.register(
 );
 
 // --- Constants internalized to avoid build export issues ---
-const DEFAULT_YEARS = ['2023-2024', '2024-2025', '2025-2026', '2026-2027'];
+const DEFAULT_YEARS = ['2026-2027'];
 const AVAILABLE_SEMESTERS = [{id: 'HK1', name: 'Học kỳ I'}, {id: 'HK2', name: 'Học kỳ II'}, {id: 'CN', name: 'Cả năm'}];
 const DEFAULT_SUBJECTS = ['Toán', 'Ngữ văn', 'Ngoại ngữ', 'Vật lý', 'Hóa học', 'Sinh học', 'KHTN', 'Lịch sử', 'Địa lý', 'LS&ĐL', 'GDCD', 'Tin học', 'Công nghệ', 'Thể dục', 'Nghệ thuật', 'HĐTN, HN', 'GDKT & PL'];
 
@@ -98,7 +98,7 @@ const INITIAL_DATA: AppData = {
     geminiApiKey: '',
     modelName: 'gemini-1.5-flash',
     theme: 'light',
-    schoolYears: DEFAULT_YEARS
+    schoolYears: ['2026-2027']
   }
 };
 
@@ -171,7 +171,15 @@ export default function App() {
         }
       }
       const mergedSettings = { ...INITIAL_DATA.settings, ...(parsed.settings || {}) };
-      if (!mergedSettings.schoolYears) mergedSettings.schoolYears = DEFAULT_YEARS;
+      // Keep only years from 2026 onward; remove legacy years before 2026-2027
+      if (!mergedSettings.schoolYears || mergedSettings.schoolYears.length === 0) {
+        mergedSettings.schoolYears = ['2026-2027'];
+      } else {
+        mergedSettings.schoolYears = mergedSettings.schoolYears.filter(
+          (y: string) => parseInt(y.split('-')[0]) >= 2026
+        );
+        if (mergedSettings.schoolYears.length === 0) mergedSettings.schoolYears = ['2026-2027'];
+      }
       return { ...INITIAL_DATA, ...parsed, settings: mergedSettings };
     }
     return INITIAL_DATA;
