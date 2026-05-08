@@ -74,7 +74,9 @@ const stripAiSpecialChars = (text: string) => {
     .replace(/\]/g, ")")
     .replace(/s_\d+_\d+/g, "") // Xóa mã ID học sinh
     .replace(/s_\d+/g, "")     // Xóa mã ID học sinh dạng ngắn
-    .replace(/oral|m15|h1|semester|bonusTotal|penaltyTotal|average/gi, "") // Xóa từ khóa kỹ thuật
+    .replace(/studentId|oral|m15|h1|semester|bonusTotal|penaltyTotal|average/gi, "") // Xóa từ khóa kỹ thuật
+    .replace(/Chào bạn.*như sau:/gs, "") // Xóa lời chào AI
+    .replace(/Dựa trên dữ liệu.*như sau:/gs, "") // Xóa câu dẫn AI
     .replace(/\{.*\}/g, "")    // Xóa JSON nếu AI lỡ ghi ra
     .replace(/\n\s*\n/g, "\n") // Xóa dòng trống thừa
     .trim();
@@ -472,7 +474,7 @@ export default function App() {
       </head>
       <body>
         <div class="header">
-          <h1 style="margin-bottom: 5px;">BÁO CÁO PHÂN TÍCH HỌC TẬP THÔNG MINH</h1>
+          <h1 style="margin-bottom: 5px;">PHÂN TÍCH KẾT QUẢ HỌC TẬP LỚP ${activeClass.name}</h1>
           <p>Lớp: ${activeClass.name} | Học kỳ: ${selectedSemester} | Năm học: ${selectedYear}</p>
           <hr/>
         </div>
