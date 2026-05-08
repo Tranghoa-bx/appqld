@@ -18,7 +18,8 @@ import {
   AlertCircle,
   History,
   Clock,
-  CalendarCheck
+  CalendarCheck,
+  ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Swal from 'sweetalert2';
@@ -215,13 +216,20 @@ export default function App() {
     const exportData = classStudents.map(s => {
       const g = classGrades.find(grade => grade.studentId === s.id);
       const avg = g ? calculateAverage(g) : 0;
+      const latestMonthly = g?.monthlyHistory && g.monthlyHistory.length > 0 ? g.monthlyHistory[g.monthlyHistory.length - 1] : null;
+      
       return {
         'Họ và Tên': s.name,
         'Giới tính': s.gender,
+        'Điểm Miệng': g?.oral.join(', ') || '',
+        'Điểm 15 Phút': g?.m15.join(', ') || '',
+        'Điểm Giữa Kỳ': g?.h1.join(', ') || '',
+        'Điểm Cuối Kỳ': g?.semester !== null && g?.semester !== undefined ? g.semester : '',
         'Đ. Cộng (+)': g?.bonusTotal || 0,
         'Đ. Trừ (-)': g?.penaltyTotal || 0,
         'ĐTB': avg,
-        'Xếp loại': getRank(avg).label
+        'Xếp loại': getRank(avg).label,
+        'Nhận xét AI': latestMonthly ? latestMonthly.suggestion : ''
       };
     });
 
@@ -232,53 +240,53 @@ export default function App() {
     Swal.fire('Thành công', 'Đã xuất file Excel!', 'success');
   };
 
-  const importExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!activeClass || !e.target.files?.length) return;
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const rows = XLSX.utils.sheet_to_json<any>(ws);
-
-        if (rows.length === 0) {
-          Swal.fire('Lỗi', 'File Excel không có dữ liệu', 'error');
-          return;
+  const handlePasteStudents = () => {
+    if (!activeClass) {
+      Swal.fire('Lỗi', 'Vui lòng chọn một lớp học', 'error');
+      return;
+    }
+    Swal.fire({
+      title: 'Dán danh sách học sinh',
+      html: `
+        <div class="text-left text-sm text-slate-500 mb-2">
+          Copy một cột chứa tên học sinh (từ Excel, Word, Notepad...) và dán vào ô dưới đây. Mỗi dòng là một học sinh. Giới tính mặc định là Nam (có thể sửa sau).
+        </div>
+        <textarea id="swal-paste-students" class="w-full h-48 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nguyễn Văn A\nTrần Thị B\n..."></textarea>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Thêm danh sách',
+      cancelButtonText: 'Hủy',
+      width: '500px',
+      preConfirm: () => {
+        const text = (document.getElementById('swal-paste-students') as HTMLTextAreaElement).value;
+        if (!text.trim()) {
+          Swal.showValidationMessage('Vui lòng dán nội dung vào ô trống');
         }
+        return text;
+      }
+    }).then(result => {
+      if (result.isConfirmed && result.value) {
+        const lines = result.value.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+        
+        if (lines.length === 0) return;
 
         const newStudents: Student[] = [];
         const newGrades: Grade[] = [];
 
-        rows.forEach((row, index) => {
-          const name = row['Họ và Tên'] || row['Họ tên'] || row['Name'] || row['Họ Và Tên'];
-          if (!name) return;
-
+        lines.forEach((name: string, index: number) => {
           const studentId = `s_${Date.now()}_${index}`;
-          const gender = String(row['Giới tính'] || row['Gender'] || '').toLowerCase() === 'nữ' ? 'Nữ' : 'Nam';
-
-          newStudents.push({ id: studentId, name: String(name), gender });
+          newStudents.push({ id: studentId, name, gender: 'Nam' });
           newGrades.push({ studentId, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 });
         });
 
-        if (newStudents.length > 0) {
-          setData(prev => ({
-            ...prev,
-            students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), ...newStudents] },
-            grades: { ...prev.grades, [selectedClassId]: [...(prev.grades[selectedClassId] || []), ...newGrades] }
-          }));
-          Swal.fire('Thành công', `Đã nhập ${newStudents.length} học sinh!`, 'success');
-        } else {
-          Swal.fire('Lỗi', 'Không tìm thấy cột "Họ và Tên" trong file', 'error');
-        }
-      } catch (err) {
-        Swal.fire('Lỗi', 'Đã xảy ra lỗi khi đọc file Excel', 'error');
+        setData(prev => ({
+          ...prev,
+          students: { ...prev.students, [selectedClassId]: [...(prev.students[selectedClassId] || []), ...newStudents] },
+          grades: { ...prev.grades, [selectedClassId]: [...(prev.grades[selectedClassId] || []), ...newGrades] }
+        }));
+        Swal.fire('Thành công', \`Đã thêm \${newStudents.length} học sinh!\`, 'success');
       }
-    };
-    reader.readAsBinaryString(file);
-    e.target.value = '';
+    });
   };
 
   const handleCloseMonth = () => {
@@ -359,6 +367,87 @@ export default function App() {
           return { ...prev, grades: { ...prev.grades, [selectedClassId]: newGrades } };
         });
         Swal.fire('Đã xóa', 'Dữ liệu nháp đã được reset về 0.', 'info');
+      }
+    });
+  };
+
+  const openScoreEditModal = (student: Student, type: 'oral' | 'm15' | 'h1' | 'semester', typeName: string, currentValue: number | null, index?: number) => {
+    const historyRows = data.history
+      .filter(h => h.studentId === student.id && h.type === typeName)
+      .map(h => `
+        <tr class="border-b border-slate-100">
+          <td class="py-2 text-xs text-slate-500">${dayjs(h.timestamp).format('HH:mm DD/MM')}</td>
+          <td class="py-2 text-xs text-center line-through text-rose-400">${h.oldValue}</td>
+          <td class="py-2 text-xs text-center font-bold text-emerald-600">${h.newValue}</td>
+        </tr>
+      `).join('');
+
+    const historyHTML = historyRows ? `
+      <div class="mt-4 border-t border-slate-200 pt-4">
+        <p class="text-sm font-bold text-slate-700 mb-2 text-left flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-history"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg> Lịch sử thay đổi (${typeName}):</p>
+        <div class="max-h-32 overflow-y-auto pr-2 custom-scrollbar">
+          <table class="w-full text-left">
+            <thead class="sticky top-0 bg-white">
+              <tr>
+                <th class="text-xs text-slate-400 font-medium pb-2">Thời gian</th>
+                <th class="text-xs text-slate-400 font-medium pb-2 text-center">Cũ</th>
+                <th class="text-xs text-slate-400 font-medium pb-2 text-center">Mới</th>
+              </tr>
+            </thead>
+            <tbody>${historyRows}</tbody>
+          </table>
+        </div>
+      </div>
+    ` : `<div class="mt-4 border-t border-slate-200 pt-4 text-xs text-slate-400 flex flex-col items-center gap-1"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="opacity-50"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Chưa có lịch sử thay đổi</div>`;
+
+    Swal.fire({
+      title: `Điểm ${typeName}`,
+      html: `
+        <div class="text-left mb-3 text-sm text-slate-600">Học sinh: <span class="font-bold text-slate-800">${student.name}</span></div>
+        <input id="swal-edit-score" type="number" class="swal2-input !mt-0" value="${currentValue !== null ? currentValue : ''}" min="0" max="10" step="0.1" placeholder="Nhập điểm...">
+        ${historyHTML}
+      `,
+      showCancelButton: true,
+      showDenyButton: currentValue !== null,
+      confirmButtonText: currentValue !== null ? 'Cập nhật' : 'Thêm điểm',
+      denyButtonText: 'Xóa điểm',
+      cancelButtonText: 'Hủy',
+      preConfirm: () => {
+        const val = (document.getElementById('swal-edit-score') as HTMLInputElement).value;
+        if (!val && currentValue === null) return false;
+        return val;
+      }
+    }).then(result => {
+      if (result.isConfirmed) {
+        const newVal = parseFloat(result.value);
+        if (isNaN(newVal)) return;
+
+        const grade = classGrades.find(g => g.studentId === student.id);
+        if (!grade) return;
+
+        if (type === 'semester') {
+          handleUpdateGrade(student.id, 'semester', newVal);
+        } else {
+          const currentArr = [...grade[type]];
+          if (index !== undefined) {
+            currentArr[index] = newVal;
+          } else {
+            currentArr.push(newVal);
+          }
+          handleUpdateGrade(student.id, type, currentArr);
+        }
+      } else if (result.isDenied && currentValue !== null) {
+        const grade = classGrades.find(g => g.studentId === student.id);
+        if (!grade) return;
+
+        if (type === 'semester') {
+          handleUpdateGrade(student.id, 'semester', null as any);
+        } else {
+          if (index !== undefined) {
+            const newArr = grade[type].filter((_, i) => i !== index);
+            handleUpdateGrade(student.id, type, newArr);
+          }
+        }
       }
     });
   };
@@ -610,11 +699,10 @@ export default function App() {
                   <CalendarCheck size={18} />
                   <span className="hidden sm:inline">Chốt kỳ</span>
                 </button>
-                <label className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md cursor-pointer">
-                  <Upload size={18} />
-                  <span className="hidden sm:inline">Nhập Excel</span>
-                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={importExcel} />
-                </label>
+                <button onClick={handlePasteStudents} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
+                  <ClipboardList size={18} />
+                  <span className="hidden sm:inline">Dán danh sách</span>
+                </button>
                 <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
                   <Download size={18} />
                   <span className="hidden sm:inline">Xuất Excel</span>
@@ -730,46 +818,14 @@ export default function App() {
                                 {grade.oral.map((s, idx) => (
                                   <button 
                                     key={idx} 
-                                    onClick={() => {
-                                      Swal.fire({
-                                        title: 'Chỉnh sửa điểm Miệng',
-                                        input: 'number',
-                                        inputValue: s,
-                                        inputAttributes: { min: '0', max: '10', step: '0.1' },
-                                        showDenyButton: true,
-                                        showCancelButton: true,
-                                        confirmButtonText: 'Cập nhật',
-                                        denyButtonText: 'Xóa điểm',
-                                        denyButtonColor: '#ef4444',
-                                        cancelButtonText: 'Hủy'
-                                      }).then(result => {
-                                        if (result.isConfirmed) {
-                                          const newVal = parseFloat(result.value);
-                                          const newArr = [...grade.oral];
-                                          newArr[idx] = newVal;
-                                          handleUpdateGrade(student.id, 'oral', newArr);
-                                        } else if (result.isDenied) {
-                                          const newArr = grade.oral.filter((_, i) => i !== idx);
-                                          handleUpdateGrade(student.id, 'oral', newArr);
-                                        }
-                                      });
-                                    }}
+                                    onClick={() => openScoreEditModal(student, 'oral', 'Miệng', s, idx)}
                                     className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-bold border border-slate-200 hover:bg-white hover:shadow-sm transition-all"
                                   >
                                     {s}
                                   </button>
                                 ))}
                                 <button 
-                                  onClick={() => {
-                                    Swal.fire({
-                                      title: 'Thêm điểm miệng',
-                                      input: 'number',
-                                      inputAttributes: { min: '0', max: '10', step: '0.1' },
-                                      showCancelButton: true
-                                    }).then(result => {
-                                      if (result.isConfirmed) handleUpdateGrade(student.id, 'oral', [...grade.oral, parseFloat(result.value)]);
-                                    });
-                                  }} 
+                                  onClick={() => openScoreEditModal(student, 'oral', 'Miệng', null)}
                                   className="text-blue-500 hover:text-blue-700"
                                 >
                                   <PlusCircle size={14} />
@@ -782,45 +838,14 @@ export default function App() {
                                 {grade.m15.map((s, idx) => (
                                   <button 
                                     key={idx} 
-                                    onClick={() => {
-                                      Swal.fire({
-                                        title: 'Chỉnh sửa điểm 15 Phút',
-                                        input: 'number',
-                                        inputValue: s,
-                                        inputAttributes: { min: '0', max: '10', step: '0.1' },
-                                        showDenyButton: true,
-                                        showCancelButton: true,
-                                        confirmButtonText: 'Cập nhật',
-                                        denyButtonText: 'Xóa điểm',
-                                        denyButtonColor: '#ef4444',
-                                        cancelButtonText: 'Hủy'
-                                      }).then(result => {
-                                        if (result.isConfirmed) {
-                                          const newVal = parseFloat(result.value);
-                                          const newArr = [...grade.m15];
-                                          newArr[idx] = newVal;
-                                          handleUpdateGrade(student.id, 'm15', newArr);
-                                        } else if (result.isDenied) {
-                                          const newArr = grade.m15.filter((_, i) => i !== idx);
-                                          handleUpdateGrade(student.id, 'm15', newArr);
-                                        }
-                                      });
-                                    }}
+                                    onClick={() => openScoreEditModal(student, 'm15', '15 Phút', s, idx)}
                                     className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-bold border border-slate-200 hover:bg-white hover:shadow-sm transition-all"
                                   >
                                     {s}
                                   </button>
                                 ))}
                                 <button className="text-blue-500 hover:text-blue-700"
-                                   onClick={() => {
-                                    Swal.fire({
-                                      title: 'Thêm điểm 15 phút',
-                                      input: 'number',
-                                      inputAttributes: { min: '0', max: '10', step: '0.1' }
-                                    }).then(result => {
-                                      if (result.isConfirmed) handleUpdateGrade(student.id, 'm15', [...grade.m15, parseFloat(result.value)]);
-                                    });
-                                  }}
+                                   onClick={() => openScoreEditModal(student, 'm15', '15 Phút', null)}
                                 >
                                   <PlusCircle size={14} />
                                 </button>
@@ -832,41 +857,14 @@ export default function App() {
                                 {grade.h1.map((s, idx) => (
                                   <button 
                                     key={idx} 
-                                    onClick={() => {
-                                      Swal.fire({
-                                        title: 'Chỉnh sửa điểm Giữa kỳ',
-                                        input: 'number',
-                                        inputValue: s,
-                                        inputAttributes: { min: '0', max: '10', step: '0.1' },
-                                        showDenyButton: true,
-                                        showCancelButton: true,
-                                        confirmButtonText: 'Cập nhật',
-                                        denyButtonText: 'Xóa điểm',
-                                        denyButtonColor: '#ef4444',
-                                        cancelButtonText: 'Hủy'
-                                      }).then(result => {
-                                        if (result.isConfirmed) {
-                                          const newVal = parseFloat(result.value);
-                                          const newArr = [...grade.h1];
-                                          newArr[idx] = newVal;
-                                          handleUpdateGrade(student.id, 'h1', newArr);
-                                        } else if (result.isDenied) {
-                                          const newArr = grade.h1.filter((_, i) => i !== idx);
-                                          handleUpdateGrade(student.id, 'h1', newArr);
-                                        }
-                                      });
-                                    }}
+                                    onClick={() => openScoreEditModal(student, 'h1', 'Giữa Kỳ', s, idx)}
                                     className="bg-indigo-50 px-1.5 py-0.5 rounded text-xs font-bold border border-indigo-200 text-indigo-700 hover:bg-white transition-all shadow-sm"
                                   >
                                     {s}
                                   </button>
                                 ))}
                                 <button className="text-indigo-500"
-                                  onClick={() => {
-                                    Swal.fire({ title: 'Thêm điểm Giữa kỳ (x2)', input: 'number' }).then(res => {
-                                      if (res.isConfirmed) handleUpdateGrade(student.id, 'h1', [...grade.h1, parseFloat(res.value)]);
-                                    });
-                                  }}
+                                  onClick={() => openScoreEditModal(student, 'h1', 'Giữa Kỳ', null)}
                                 >
                                   <PlusCircle size={14} />
                                 </button>
@@ -875,15 +873,7 @@ export default function App() {
                             {/* Cuối Kỳ */}
                             <td className="px-6 py-4 text-center">
                                <button 
-                                  onClick={() => {
-                                    Swal.fire({
-                                      title: 'Nhập điểm Cuối kỳ (x3)',
-                                      input: 'number',
-                                      inputValue: grade.semester || ''
-                                    }).then(res => {
-                                      if (res.isConfirmed) handleUpdateGrade(student.id, 'semester', parseFloat(res.value));
-                                    });
-                                  }}
+                                  onClick={() => openScoreEditModal(student, 'semester', 'Cuối Kỳ', grade.semester)}
                                   className={`px-3 py-1 rounded-lg border font-bold text-xs transition-all ${grade.semester !== null ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
                                 >
                                   {grade.semester !== null ? grade.semester : 'Chưa nhập'}
@@ -1103,15 +1093,64 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100">
                       {(() => {
                         const allStudents = Object.values(data.students).flat() as Student[];
-                        return data.history.filter(h => {
+                        const filteredHistory = data.history.filter(h => {
                           const studentName = allStudents.find(s => s.id === h.studentId)?.name || '';
                           return studentName.toLowerCase().includes(searchQuery.toLowerCase());
-                        }).map((item) => {
+                        });
+
+                        const latestHistoryMap = new Map<string, HistoryRecord>();
+                        filteredHistory.forEach(h => {
+                          if (!latestHistoryMap.has(h.studentId)) {
+                            latestHistoryMap.set(h.studentId, h);
+                          }
+                        });
+
+                        return Array.from(latestHistoryMap.values()).map((item) => {
                           const student = allStudents.find(s => s.id === item.studentId);
+                          const totalChanges = data.history.filter(h => h.studentId === item.studentId).length;
+
                           return (
-                            <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                            <tr key={item.id} 
+                                className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
+                                onClick={() => {
+                                  if (!student) return;
+                                  const studentHistory = data.history.filter(h => h.studentId === student.id);
+                                  const rows = studentHistory.map(h => `
+                                    <tr class="border-b border-slate-100">
+                                      <td class="py-2 text-xs text-slate-500">${dayjs(h.timestamp).format('HH:mm DD/MM')}</td>
+                                      <td class="py-2 text-xs text-center font-semibold text-slate-700">${h.type}</td>
+                                      <td class="py-2 text-xs text-center line-through text-rose-400">${h.oldValue}</td>
+                                      <td class="py-2 text-xs text-center font-bold text-emerald-600">${h.newValue}</td>
+                                    </tr>
+                                  `).join('');
+                                  
+                                  Swal.fire({
+                                    title: `Lịch sử: ${student.name}`,
+                                    html: `
+                                      <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                                        <table class="w-full text-left">
+                                          <thead class="sticky top-0 bg-white">
+                                            <tr>
+                                              <th class="text-xs text-slate-400 font-medium pb-2">Thời gian</th>
+                                              <th class="text-xs text-slate-400 font-medium pb-2 text-center">Loại</th>
+                                              <th class="text-xs text-slate-400 font-medium pb-2 text-center">Cũ</th>
+                                              <th class="text-xs text-slate-400 font-medium pb-2 text-center">Mới</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>${rows}</tbody>
+                                        </table>
+                                      </div>
+                                    `,
+                                    width: '500px',
+                                    confirmButtonText: 'Đóng'
+                                  });
+                                }}
+                            >
                               <td className="px-6 py-4 text-xs text-slate-500 font-medium">
                                 {dayjs(item.timestamp).format('HH:mm - DD/MM/YYYY')}
+                                <div className="text-[10px] text-blue-500 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  Xem chi tiết ${totalChanges} lần sửa
+                                </div>
                               </td>
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-2">
