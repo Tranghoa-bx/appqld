@@ -528,11 +528,14 @@ export default function App() {
     const sections = classStudents.map(s => {
       const g = (data.grades[gradeKey] || []).find(grade => grade.studentId === s.id);
       const cleanedAnalysis = stripAiSpecialChars(g?.aiAnalysis || "Chưa có dữ liệu phân tích AI cho học sinh này.");
+      // In đậm các mục số 1., 2., 3.
+      const formattedAnalysis = cleanedAnalysis.replace(/^(\d+\.)/gm, '<b>$1</b>');
+      
       return `
         <div class="student-section">
-          <div class="student-name">Học sinh: ${s.name}</div>
+          <div class="student-name">${idx + 1}. Học sinh: ${s.name}</div>
           <div class="analysis-content">
-            ${cleanedAnalysis.replace(/\n/g, '<br/>')}
+            ${formattedAnalysis.replace(/\n/g, '<br/>')}
           </div>
         </div>
       `;
@@ -573,7 +576,7 @@ export default function App() {
     let tableData: any[][] = [];
 
     if (selectedSemester === 'CN') {
-      tableHeaders = ['STT', 'Họ và Tên', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Hạng', 'Xếp loại'];
+      tableHeaders = ['STT', 'Họ và Tên', 'ĐTB HK I', 'ĐTB HK II', 'ĐTB Cả năm', 'Ròng', 'Hạng', 'Xếp loại'];
       tableData = classStudents.map((s, idx) => {
         const rowNum = idx + 6;
         const hk1Key = `${selectedYear}_HK1_${selectedSubject}_${selectedClassId}`;
@@ -591,12 +594,13 @@ export default function App() {
           avg1 || 0,
           avg2 || 0,
           { f: `ROUND((C${rowNum}+D${rowNum}*2)/3,1)` },
+          { f: `E${rowNum}` }, // Ròng cả năm tạm thời bằng ĐTB CN
           hasGrade ? cnRanks[s.id] : '',
           hasGrade ? getRank(cnAvg).label : ''
         ];
       });
     } else {
-      tableHeaders = ['STT', 'Họ và Tên', 'TX1', 'TX2', 'TX3', 'TX4', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng (+)', 'Trừ (-)', 'ĐTB', 'Hạng', 'Xếp loại'];
+      tableHeaders = ['STT', 'Họ và Tên', 'TX1', 'TX2', 'TX3', 'TX4', 'Giữa Kỳ', 'Cuối Kỳ', 'Cộng (+)', 'Trừ (-)', 'ĐTB', 'Ròng', 'Hạng', 'Xếp loại'];
       tableData = classStudents.map((s, idx) => {
         const rowNum = idx + 6;
         const g = classGrades.find(grade => grade.studentId === s.id);
@@ -613,6 +617,7 @@ export default function App() {
           g?.bonusTotal || 0,
           g?.penaltyTotal || 0,
           { f: `ROUND((C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}+G${rowNum}*2+H${rowNum}*3)/9,1)` },
+          { f: `K${rowNum}+I${rowNum}-J${rowNum}` },
           avg > 0 ? normalRanks[s.id] : '',
           avg > 0 ? getRank(avg).label : ''
         ];
