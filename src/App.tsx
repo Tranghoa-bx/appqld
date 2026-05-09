@@ -82,6 +82,20 @@ const stripAiSpecialChars = (text: string) => {
     .trim();
 };
 
+const ALL_COLUMNS = [
+  { id: 'tx1', name: 'TX1' },
+  { id: 'tx2', name: 'TX2' },
+  { id: 'tx3', name: 'TX3' },
+  { id: 'tx4', name: 'TX4' },
+  { id: 'h1', name: 'Giữa Kỳ' },
+  { id: 'semester', name: 'Cuối Kỳ' },
+  { id: 'bonus', name: 'Điểm Cộng' },
+  { id: 'penalty', name: 'Điểm Trừ' },
+  { id: 'net', name: 'Điểm Ròng' },
+  { id: 'avg', name: 'ĐTB' },
+  { id: 'rank', name: 'Xếp hạng' },
+];
+
 const INITIAL_DATA: AppData = {
   classes: [
     { id: '9a1', name: 'Lớp 9A1', subject: 'Toán học' },
@@ -118,7 +132,8 @@ const INITIAL_DATA: AppData = {
     geminiApiKey: '',
     modelName: 'gemini-1.5-flash',
     theme: 'light',
-    schoolYears: ['2026-2027','2027-2028','2028-2029','2029-2030','2030-2031','2031-2032','2032-2033','2033-2034','2034-2035','2035-2036','2036-2037','2037-2038','2038-2039','2039-2040']
+    schoolYears: DEFAULT_YEARS,
+    visibleColumns: ['tx1', 'tx2', 'tx3', 'tx4', 'h1', 'semester', 'bonus', 'penalty', 'net', 'avg', 'rank']
   }
 };
 
@@ -627,6 +642,42 @@ export default function App() {
     
     XLSX.writeFile(wb, `BaoCao_SmartGrade_${activeClass.name}_${selectedYear}.xlsx`);
     Swal.fire('Thành công', 'Đã xuất file Excel bảng điểm và thống kê!', 'success');
+  };
+
+  const handleConfigColumns = () => {
+    const currentCols = data.settings.visibleColumns || ALL_COLUMNS.map(c => c.id);
+    
+    Swal.fire({
+      title: 'Cấu hình hiển thị cột',
+      html: `
+        <div class="grid grid-cols-2 gap-2 text-left p-4">
+          ${ALL_COLUMNS.map(col => `
+            <label class="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-xl cursor-pointer border border-transparent hover:border-slate-100 transition-all">
+              <input type="checkbox" id="col-${col.id}" ${currentCols.includes(col.id) ? 'checked' : ''} class="w-5 h-5 rounded-md border-slate-300 text-blue-600 focus:ring-blue-500">
+              <span class="text-sm font-bold text-slate-700">${col.name}</span>
+            </label>
+          `).join('')}
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Áp dụng',
+      cancelButtonText: 'Hủy',
+      confirmButtonColor: '#3b82f6',
+      preConfirm: () => {
+        const selected = ALL_COLUMNS.filter(c => (document.getElementById(`col-${c.id}`) as HTMLInputElement).checked).map(c => c.id);
+        if (selected.length === 0) {
+          Swal.showValidationMessage('Vui lòng chọn ít nhất 1 cột');
+        }
+        return selected;
+      }
+    }).then(result => {
+      if (result.isConfirmed) {
+        setData(prev => ({
+          ...prev,
+          settings: { ...prev.settings, visibleColumns: result.value }
+        }));
+      }
+    });
   };
 
   const handlePasteStudents = () => {
@@ -1174,6 +1225,10 @@ export default function App() {
                   <Download size={18} />
                   <span className="hidden sm:inline">Xuất Word (AI)</span>
                 </button>
+                <button onClick={handleConfigColumns} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm">
+                  <SettingsIcon size={18} />
+                  <span className="hidden sm:inline">Cấu hình cột</span>
+                </button>
                 <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
                   <Upload size={18} />
                   <span className="hidden sm:inline">Xuất Excel</span>
@@ -1270,8 +1325,8 @@ export default function App() {
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">ĐTB Học kỳ I</th>
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">ĐTB Học kỳ II</th>
-                          <th className="px-6 py-4 text-xs font-bold text-blue-600 uppercase text-center bg-blue-50/30">ĐTB Cả năm</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>
+                          {(data.settings.visibleColumns || []).includes('avg') && <th className="px-6 py-4 text-xs font-bold text-blue-600 uppercase text-center bg-blue-50/30">ĐTB Cả năm</th>}
+                          {(data.settings.visibleColumns || []).includes('rank') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>}
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Xếp loại</th>
                         </tr>
                       </thead>
@@ -1313,8 +1368,8 @@ export default function App() {
                               </td>
                               <td className="px-6 py-4 text-center font-semibold text-slate-600">{avg1 > 0 ? avg1 : '-'}</td>
                               <td className="px-6 py-4 text-center font-semibold text-slate-600">{avg2 > 0 ? avg2 : '-'}</td>
-                              <td className="px-6 py-4 text-center font-bold text-blue-600 bg-blue-50/30 text-lg">{cnAvg > 0 ? cnAvg : '-'}</td>
-                              <td className="px-6 py-4 text-center font-bold text-amber-600 text-lg">{cnAvg > 0 ? cnRanks[student.id] : '-'}</td>
+                              {(data.settings.visibleColumns || []).includes('avg') && <td className="px-6 py-4 text-center font-bold text-blue-600 bg-blue-50/30 text-lg">{cnAvg > 0 ? cnAvg : '-'}</td>}
+                              {(data.settings.visibleColumns || []).includes('rank') && <td className="px-6 py-4 text-center font-bold text-amber-600 text-lg">{cnAvg > 0 ? cnRanks[student.id] : '-'}</td>}
                               <td className="px-6 py-4 text-center">
                                 {cnAvg > 0 ? (
                                   <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${rank.bg} ${rank.color}`}>
@@ -1332,17 +1387,17 @@ export default function App() {
                     <thead>
                       <tr className="bg-slate-50/80 border-b border-slate-200">
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX1</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX2</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX3</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX4</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Giữa Kỳ (x2)</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Cuối Kỳ (x3)</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30">Cộng (+)</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>
+                        {(data.settings.visibleColumns || []).includes('tx1') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX1</th>}
+                        {(data.settings.visibleColumns || []).includes('tx2') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX2</th>}
+                        {(data.settings.visibleColumns || []).includes('tx3') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX3</th>}
+                        {(data.settings.visibleColumns || []).includes('tx4') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX4</th>}
+                        {(data.settings.visibleColumns || []).includes('h1') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Giữa Kỳ (x2)</th>}
+                        {(data.settings.visibleColumns || []).includes('semester') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Cuối Kỳ (x3)</th>}
+                        {(data.settings.visibleColumns || []).includes('bonus') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30">Cộng (+)</th>}
+                        {(data.settings.visibleColumns || []).includes('penalty') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>}
+                        {(data.settings.visibleColumns || []).includes('net') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>}
+                        {(data.settings.visibleColumns || []).includes('avg') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>}
+                        {(data.settings.visibleColumns || []).includes('rank') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>}
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -1424,109 +1479,131 @@ export default function App() {
                               </div>
                             </td>
                             {/* TX1 */}
-                            <td className="px-3 py-4 text-center">
-                              <input 
-                                type="text"
-                                placeholder="-"
-                                value={draftGrades[student.id]?.tx1 !== undefined ? draftGrades[student.id].tx1 : (grade.oral[0] ?? '')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx1: e.target.value } }))}
-                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
-                              />
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('tx1') && (
+                              <td className="px-3 py-4 text-center">
+                                <input 
+                                  type="text"
+                                  placeholder="-"
+                                  value={draftGrades[student.id]?.tx1 !== undefined ? draftGrades[student.id].tx1 : (grade.oral[0] ?? '')}
+                                  onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx1: e.target.value } }))}
+                                  className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                                />
+                              </td>
+                            )}
                             {/* TX2 */}
-                            <td className="px-3 py-4 text-center">
-                              <input 
-                                type="text"
-                                placeholder="-"
-                                value={draftGrades[student.id]?.tx2 !== undefined ? draftGrades[student.id].tx2 : (grade.oral[1] ?? '')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx2: e.target.value } }))}
-                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx2 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
-                              />
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('tx2') && (
+                              <td className="px-3 py-4 text-center">
+                                <input 
+                                  type="text"
+                                  placeholder="-"
+                                  value={draftGrades[student.id]?.tx2 !== undefined ? draftGrades[student.id].tx2 : (grade.oral[1] ?? '')}
+                                  onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx2: e.target.value } }))}
+                                  className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx2 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                                />
+                              </td>
+                            )}
                             {/* TX3 */}
-                            <td className="px-3 py-4 text-center">
-                              <input 
-                                type="text"
-                                placeholder="-"
-                                value={draftGrades[student.id]?.tx3 !== undefined ? draftGrades[student.id].tx3 : (grade.m15[0] ?? '')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx3: e.target.value } }))}
-                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx3 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
-                              />
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('tx3') && (
+                              <td className="px-3 py-4 text-center">
+                                <input 
+                                  type="text"
+                                  placeholder="-"
+                                  value={draftGrades[student.id]?.tx3 !== undefined ? draftGrades[student.id].tx3 : (grade.m15[0] ?? '')}
+                                  onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx3: e.target.value } }))}
+                                  className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx3 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                                />
+                              </td>
+                            )}
                             {/* TX4 */}
-                            <td className="px-3 py-4 text-center">
-                              <input 
-                                type="text"
-                                placeholder="-"
-                                value={draftGrades[student.id]?.tx4 !== undefined ? draftGrades[student.id].tx4 : (grade.m15[1] ?? '')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx4: e.target.value } }))}
-                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx4 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
-                              />
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('tx4') && (
+                              <td className="px-3 py-4 text-center">
+                                <input 
+                                  type="text"
+                                  placeholder="-"
+                                  value={draftGrades[student.id]?.tx4 !== undefined ? draftGrades[student.id].tx4 : (grade.m15[1] ?? '')}
+                                  onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), tx4: e.target.value } }))}
+                                  className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.tx4 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-slate-200 focus:border-blue-500 text-slate-700 hover:border-slate-300'}`}
+                                />
+                              </td>
+                            )}
                             {/* Giữa kỳ */}
-                            <td className="px-6 py-4 text-center">
-                              <input 
-                                type="text"
-                                value={draftGrades[student.id]?.h1 !== undefined ? draftGrades[student.id].h1 : grade.h1.join(' ')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), h1: e.target.value } }))}
-                                className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-indigo-200 focus:border-indigo-500 text-indigo-700 hover:border-indigo-300'}`}
-                              />
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('h1') && (
+                              <td className="px-6 py-4 text-center">
+                                <input 
+                                  type="text"
+                                  value={draftGrades[student.id]?.h1 !== undefined ? draftGrades[student.id].h1 : grade.h1.join(' ')}
+                                  onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), h1: e.target.value } }))}
+                                  className={`w-16 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.h1 !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-indigo-200 focus:border-indigo-500 text-indigo-700 hover:border-indigo-300'}`}
+                                />
+                              </td>
+                            )}
                             {/* Cuối Kỳ */}
-                            <td className="px-6 py-4 text-center">
-                              <input 
-                                type="text"
-                                value={draftGrades[student.id]?.semester !== undefined ? draftGrades[student.id].semester : (grade.semester !== null ? grade.semester : '')}
-                                onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), semester: e.target.value } }))}
-                                className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.semester !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-purple-200 focus:border-purple-500 text-purple-700 hover:border-purple-300'}`}
-                              />
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('semester') && (
+                              <td className="px-6 py-4 text-center">
+                                <input 
+                                  type="text"
+                                  value={draftGrades[student.id]?.semester !== undefined ? draftGrades[student.id].semester : (grade.semester !== null ? grade.semester : '')}
+                                  onChange={e => setDraftGrades(prev => ({ ...prev, [student.id]: { ...(prev[student.id] || {}), semester: e.target.value } }))}
+                                  className={`w-12 text-center px-1 py-1.5 bg-transparent border-b-2 focus:outline-none transition-colors font-bold ${draftGrades[student.id]?.semester !== undefined ? 'border-rose-400 text-rose-600 bg-rose-50' : 'border-purple-200 focus:border-purple-500 text-purple-700 hover:border-purple-300'}`}
+                                />
+                              </td>
+                            )}
                             {/* Điểm Cộng */}
-                            <td className="px-6 py-4 text-center bg-emerald-50/10">
-                               <div className="flex flex-col items-center gap-1">
-                                <span className={`font-black text-emerald-600 text-sm ${edits.bonusTotal !== undefined ? 'animate-pulse' : ''}`}>+{displayGrade.bonusTotal || 0}</span>
-                                <div className="flex gap-2">
-                                  <button onClick={() => updateBonus(student.id, -0.25)} className="text-emerald-500 hover:scale-110 transition-transform">
-                                    <MinusCircle size={14} />
-                                  </button>
-                                  <button onClick={() => updateBonus(student.id, 0.25)} className="text-emerald-500 hover:scale-110 transition-transform">
-                                    <PlusCircle size={14} />
-                                  </button>
+                            {(data.settings.visibleColumns || []).includes('bonus') && (
+                              <td className="px-6 py-4 text-center bg-emerald-50/10">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className={`font-black text-emerald-600 text-sm ${edits.bonusTotal !== undefined ? 'animate-pulse' : ''}`}>+{displayGrade.bonusTotal || 0}</span>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => updateBonus(student.id, -0.25)} className="text-emerald-500 hover:scale-110 transition-transform">
+                                      <MinusCircle size={14} />
+                                    </button>
+                                    <button onClick={() => updateBonus(student.id, 0.25)} className="text-emerald-500 hover:scale-110 transition-transform">
+                                      <PlusCircle size={14} />
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
+                              </td>
+                            )}
                             {/* Điểm Trừ */}
-                            <td className="px-6 py-4 text-center bg-rose-50/10">
-                               <div className="flex flex-col items-center gap-1">
-                                <span className={`font-black text-rose-600 text-sm ${edits.penaltyTotal !== undefined ? 'animate-pulse' : ''}`}>-{displayGrade.penaltyTotal || 0}</span>
-                                <div className="flex gap-2">
-                                  <button onClick={() => updatePenalty(student.id, -0.25)} className="text-rose-500 hover:scale-110 transition-transform">
-                                    <MinusCircle size={14} />
-                                  </button>
-                                  <button onClick={() => updatePenalty(student.id, 0.25)} className="text-rose-500 hover:scale-110 transition-transform">
-                                    <PlusCircle size={14} />
-                                  </button>
+                            {(data.settings.visibleColumns || []).includes('penalty') && (
+                              <td className="px-6 py-4 text-center bg-rose-50/10">
+                                 <div className="flex flex-col items-center gap-1">
+                                  <span className={`font-black text-rose-600 text-sm ${edits.penaltyTotal !== undefined ? 'animate-pulse' : ''}`}>-{displayGrade.penaltyTotal || 0}</span>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => updatePenalty(student.id, -0.25)} className="text-rose-500 hover:scale-110 transition-transform">
+                                      <MinusCircle size={14} />
+                                    </button>
+                                    <button onClick={() => updatePenalty(student.id, 0.25)} className="text-rose-500 hover:scale-110 transition-transform">
+                                      <PlusCircle size={14} />
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
+                              </td>
+                            )}
                             {/* Điểm Ròng */}
-                            <td className="px-6 py-4 text-center bg-indigo-50/20">
-                              <span className={`text-sm font-bold ${((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? 'text-emerald-600' : ((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                                {((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? '+' : ''}{(displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)}
-                              </span>
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('net') && (
+                              <td className="px-6 py-4 text-center bg-indigo-50/20">
+                                <span className={`text-sm font-bold ${((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? 'text-emerald-600' : ((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                  {((displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)) > 0 ? '+' : ''}{(displayGrade.bonusTotal || 0) - (displayGrade.penaltyTotal || 0)}
+                                </span>
+                              </td>
+                            )}
                             {/* ĐTB */}
-                            <td className="px-6 py-4 text-center bg-blue-50/20">
-                              <span className={`text-lg font-black ${rank.color}`}>
-                                {avg || '0'}
-                              </span>
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('avg') && (
+                              <td className="px-6 py-4 text-center bg-blue-50/20">
+                                <span className={`text-lg font-black ${rank.color}`}>
+                                  {avg || '0'}
+                                </span>
+                              </td>
+                            )}
                             {/* Hạng */}
-                            <td className="px-6 py-4 text-center">
-                              <span className="font-bold text-amber-600 text-lg">
-                                {avg > 0 ? normalRanks[student.id] : '-'}
-                              </span>
-                            </td>
+                            {(data.settings.visibleColumns || []).includes('rank') && (
+                              <td className="px-6 py-4 text-center">
+                                <span className="font-bold text-amber-600 text-lg">
+                                  {avg > 0 ? normalRanks[student.id] : '-'}
+                                </span>
+                              </td>
+                            )}
                             {/* Action */}
                             <td className="px-6 py-4 text-right">
                               <div className="flex items-center justify-end gap-2">
