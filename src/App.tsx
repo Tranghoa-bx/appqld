@@ -83,6 +83,8 @@ const stripAiSpecialChars = (text: string) => {
 };
 
 const ALL_COLUMNS = [
+  { id: 'code', name: 'Mã HS' },
+  { id: 'birthday', name: 'Ngày sinh' },
   { id: 'tx1', name: 'TX1' },
   { id: 'tx2', name: 'TX2' },
   { id: 'tx3', name: 'TX3' },
@@ -93,7 +95,8 @@ const ALL_COLUMNS = [
   { id: 'penalty', name: 'Điểm Trừ' },
   { id: 'net', name: 'Điểm Ròng' },
   { id: 'avg', name: 'ĐTB' },
-  { id: 'rank', name: 'Xếp hạng' },
+  { id: 'rank', name: 'Hạng' },
+  { id: 'comment', name: 'Nhận xét' },
 ];
 
 const INITIAL_DATA: AppData = {
@@ -103,15 +106,15 @@ const INITIAL_DATA: AppData = {
   ],
   students: {
     '9a1': [
-      { id: 's1', name: 'Nguyễn Văn An', gender: 'Nam', birthday: '2010-05-15' },
-      { id: 's2', name: 'Trần Thị Bình', gender: 'Nữ', birthday: '2010-08-20' },
-      { id: 's3', name: 'Lê Hoàng Long', gender: 'Nam', birthday: '2010-12-01' },
-      { id: 's4', name: 'Phạm Minh Châu', gender: 'Nữ', birthday: '2010-02-12' },
-      { id: 's5', name: 'Hoàng Quốc Việt', gender: 'Nam', birthday: '2010-07-30' },
+      { id: 's1', code: '2024001', name: 'Nguyễn Văn An', gender: 'Nam', birthday: '2010-05-15' },
+      { id: 's2', code: '2024002', name: 'Trần Thị Bình', gender: 'Nữ', birthday: '2010-08-20' },
+      { id: 's3', code: '2024003', name: 'Lê Hoàng Long', gender: 'Nam', birthday: '2010-12-01' },
+      { id: 's4', code: '2024004', name: 'Phạm Minh Châu', gender: 'Nữ', birthday: '2010-02-12' },
+      { id: 's5', code: '2024005', name: 'Hoàng Quốc Việt', gender: 'Nam', birthday: '2010-07-30' },
     ],
     '9a2': [
-      { id: 's6', name: 'Đặng Thùy Chi', gender: 'Nữ', birthday: '2010-03-05' },
-      { id: 's7', name: 'Vũ Minh Đức', gender: 'Nam', birthday: '2010-10-10' },
+      { id: 's6', code: '2024006', name: 'Đặng Thùy Chi', gender: 'Nữ', birthday: '2010-03-05' },
+      { id: 's7', code: '2024007', name: 'Vũ Minh Đức', gender: 'Nam', birthday: '2010-10-10' },
     ]
   },
   grades: {
@@ -133,7 +136,7 @@ const INITIAL_DATA: AppData = {
     modelName: 'gemini-1.5-flash',
     theme: 'light',
     schoolYears: DEFAULT_YEARS,
-    visibleColumns: ['tx1', 'tx2', 'tx3', 'tx4', 'h1', 'semester', 'bonus', 'penalty', 'net', 'avg', 'rank']
+    visibleColumns: ['code', 'tx1', 'tx2', 'tx3', 'tx4', 'h1', 'semester', 'bonus', 'penalty', 'net', 'avg', 'rank', 'comment']
   }
 };
 
@@ -680,6 +683,64 @@ export default function App() {
     });
   };
 
+  const handleBulkComment = () => {
+    Swal.fire({
+      title: 'Nhập nhận xét theo khoảng điểm',
+      html: `
+        <div class="space-y-4 text-left p-2">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Khoảng điểm</label>
+            <div class="flex items-center gap-2">
+              <input id="bulk-min" type="number" step="0.1" placeholder="Min" class="swal2-input !m-0 !w-full" value="8">
+              <span>đến</span>
+              <input id="bulk-max" type="number" step="0.1" placeholder="Max" class="swal2-input !m-0 !w-full" value="10">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nội dung nhận xét</label>
+            <textarea id="bulk-comment" class="swal2-textarea !m-0 !w-full" placeholder="Nhập nội dung nhận xét..."></textarea>
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Áp dụng cho lớp',
+      cancelButtonText: 'Hủy',
+      preConfirm: () => {
+        const min = parseFloat((document.getElementById('bulk-min') as HTMLInputElement).value);
+        const max = parseFloat((document.getElementById('bulk-max') as HTMLInputElement).value);
+        const comment = (document.getElementById('bulk-comment') as HTMLTextAreaElement).value;
+        if (isNaN(min) || isNaN(max)) Swal.showValidationMessage('Vui lòng nhập khoảng điểm hợp lệ');
+        if (!comment) Swal.showValidationMessage('Vui lòng nhập nội dung nhận xét');
+        return { min, max, comment };
+      }
+    }).then(result => {
+      if (result.isConfirmed) {
+        const { min, max, comment } = result.value;
+        setData(prev => {
+          const newGrades = { ...prev.grades };
+          const classGrades = [...(newGrades[gradeKey] || [])];
+          
+          classStudents.forEach(s => {
+            const gIdx = classGrades.findIndex(g => g.studentId === s.id);
+            const g = gIdx !== -1 ? classGrades[gIdx] : { studentId: s.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 };
+            const avg = calculateAverage(g);
+            
+            if (avg >= min && avg <= max) {
+              if (gIdx !== -1) {
+                classGrades[gIdx] = { ...g, manualComment: comment };
+              } else {
+                classGrades.push({ ...g, manualComment: comment });
+              }
+            }
+          });
+          
+          return { ...prev, grades: { ...prev.grades, [gradeKey]: classGrades } };
+        });
+        Swal.fire('Thành công', 'Đã cập nhật nhận xét cho các học sinh đạt điều kiện!', 'success');
+      }
+    });
+  };
+
   const handlePasteStudents = () => {
     if (!activeClass) {
       Swal.fire('Lỗi', 'Vui lòng chọn một lớp học', 'error');
@@ -1217,6 +1278,10 @@ export default function App() {
                   <BrainCircuit size={18} />
                   <span className="hidden sm:inline">Phân tích lớp (AI)</span>
                 </button>
+                <button onClick={handleBulkComment} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm">
+                  <ClipboardList size={18} />
+                  <span className="hidden sm:inline">Nhập nhận xét</span>
+                </button>
                 <button onClick={handlePasteStudents} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-md">
                   <ClipboardList size={18} />
                   <span className="hidden sm:inline">Dán danh sách</span>
@@ -1387,6 +1452,8 @@ export default function App() {
                     <thead>
                       <tr className="bg-slate-50/80 border-b border-slate-200">
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
+                        {(data.settings.visibleColumns || []).includes('code') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Mã HS</th>}
+                        {(data.settings.visibleColumns || []).includes('birthday') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Ngày sinh</th>}
                         {(data.settings.visibleColumns || []).includes('tx1') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX1</th>}
                         {(data.settings.visibleColumns || []).includes('tx2') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX2</th>}
                         {(data.settings.visibleColumns || []).includes('tx3') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX3</th>}
@@ -1398,6 +1465,7 @@ export default function App() {
                         {(data.settings.visibleColumns || []).includes('net') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>}
                         {(data.settings.visibleColumns || []).includes('avg') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>}
                         {(data.settings.visibleColumns || []).includes('rank') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>}
+                        {(data.settings.visibleColumns || []).includes('comment') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Nhận xét</th>}
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -1440,6 +1508,8 @@ export default function App() {
                                           title: 'Sửa thông tin học sinh',
                                           html: `
                                             <input id="swal-student-name" class="swal2-input" value="${student.name}" placeholder="Tên học sinh">
+                                            <input id="swal-student-code" class="swal2-input" value="${student.code || ''}" placeholder="Mã học sinh">
+                                            <input id="swal-student-birthday" class="swal2-input" type="date" value="${student.birthday || ''}" placeholder="Ngày sinh">
                                             <select id="swal-student-gender" class="swal2-select">
                                               <option value="Nam" ${student.gender === 'Nam' ? 'selected' : ''}>Nam</option>
                                               <option value="Nữ" ${student.gender === 'Nữ' ? 'selected' : ''}>Nữ</option>
@@ -1450,16 +1520,18 @@ export default function App() {
                                           cancelButtonText: 'Hủy',
                                           preConfirm: () => {
                                             const name = (document.getElementById('swal-student-name') as HTMLInputElement).value;
+                                            const code = (document.getElementById('swal-student-code') as HTMLInputElement).value;
+                                            const birthday = (document.getElementById('swal-student-birthday') as HTMLInputElement).value;
                                             const gender = (document.getElementById('swal-student-gender') as HTMLSelectElement).value as 'Nam' | 'Nữ';
                                             if (!name) Swal.showValidationMessage('Vui lòng nhập tên học sinh');
-                                            return { name, gender };
+                                            return { name, code, birthday, gender };
                                           }
                                         }).then((res) => {
                                           if (res.isConfirmed) {
                                             setData(prev => {
                                               const newStudents = [...(prev.students[selectedClassId] || [])];
                                               const idx = newStudents.findIndex(s => s.id === student.id);
-                                              if (idx !== -1) newStudents[idx] = { ...newStudents[idx], name: res.value.name, gender: res.value.gender };
+                                              if (idx !== -1) newStudents[idx] = { ...newStudents[idx], name: res.value.name, code: res.value.code, birthday: res.value.birthday, gender: res.value.gender };
                                               return { ...prev, students: { ...prev.students, [selectedClassId]: newStudents } };
                                             });
                                           }
@@ -1478,6 +1550,8 @@ export default function App() {
                                 </div>
                               </div>
                             </td>
+                            {(data.settings.visibleColumns || []).includes('code') && <td className="px-6 py-4 text-sm text-slate-500 font-mono">{student.code || '-'}</td>}
+                            {(data.settings.visibleColumns || []).includes('birthday') && <td className="px-6 py-4 text-sm text-slate-500">{student.birthday || '-'}</td>}
                             {/* TX1 */}
                             {(data.settings.visibleColumns || []).includes('tx1') && (
                               <td className="px-3 py-4 text-center">
@@ -1602,6 +1676,30 @@ export default function App() {
                                 <span className="font-bold text-amber-600 text-lg">
                                   {avg > 0 ? normalRanks[student.id] : '-'}
                                 </span>
+                              </td>
+                            )}
+                            {/* Nhận xét */}
+                            {(data.settings.visibleColumns || []).includes('comment') && (
+                              <td className="px-6 py-4">
+                                <textarea
+                                  value={grade.manualComment || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setData(prev => {
+                                      const newGrades = { ...prev.grades };
+                                      const classGrades = [...(newGrades[gradeKey] || [])];
+                                      const gIdx = classGrades.findIndex(g => g.studentId === student.id);
+                                      if (gIdx !== -1) {
+                                        classGrades[gIdx] = { ...classGrades[gIdx], manualComment: val };
+                                      } else {
+                                        classGrades.push({ studentId: student.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0, manualComment: val });
+                                      }
+                                      return { ...prev, grades: { ...prev.grades, [gradeKey]: classGrades } };
+                                    });
+                                  }}
+                                  placeholder="..."
+                                  className="w-48 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[40px] resize-y"
+                                />
                               </td>
                             )}
                             {/* Action */}
