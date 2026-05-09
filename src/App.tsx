@@ -113,11 +113,13 @@ const ALL_COLUMNS = [
 ];
 
 const INITIAL_DATA: AppData = {
-  classes: [
-    { id: '9a1', name: 'Lớp 9A1', gradeLevel: '9', subject: 'Toán học' },
-    { id: '9a2', name: 'Lớp 9A2', gradeLevel: '9', subject: 'Ngữ văn' },
-    { id: '6a1', name: 'Lớp 6A1', gradeLevel: '6', subject: 'Toán học' },
-  ].sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name)),
+  classes: {
+    '2023-2024': [
+      { id: '9a1', name: 'Lớp 9A1', gradeLevel: '9', subject: 'Toán học' },
+      { id: '9a2', name: 'Lớp 9A2', gradeLevel: '9', subject: 'Ngữ văn' },
+      { id: '6a1', name: 'Lớp 6A1', gradeLevel: '6', subject: 'Toán học' },
+    ].sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name)),
+  },
   students: {
     '9a1': [
       { id: 's1', code: '2024001', name: 'Nguyễn Văn An', gender: 'Nam', birthday: '2010-05-15' },
@@ -223,6 +225,12 @@ export default function App() {
           parsed.grades = newGrades;
         }
       }
+
+      // Migrate classes from Array to Record<string, ClassRoom[]>
+      if (parsed.classes && Array.isArray(parsed.classes)) {
+        const legacyClasses = parsed.classes;
+        parsed.classes = { '2023-2024': legacyClasses };
+      }
       const mergedSettings = { ...INITIAL_DATA.settings, ...(parsed.settings || {}) };
       // Always include full DEFAULT_YEARS, plus any custom years user added (2026+)
       const savedYears: string[] = (mergedSettings.schoolYears || []).filter(
@@ -241,7 +249,11 @@ export default function App() {
   const [selectedYear, setSelectedYear] = useState(data.settings.lastYear || availableYears[availableYears.length - 1]);
   const [selectedSemester, setSelectedSemester] = useState(data.settings.lastSemester || 'HK1');
   const [selectedSubject, setSelectedSubject] = useState(data.settings.lastSubject || 'Toán');
-  const [selectedClassId, setSelectedClassId] = useState<string>(data.settings.lastClassId || data.classes[0]?.id || '');
+  const [selectedClassId, setSelectedClassId] = useState<string>(() => {
+    const lastClassId = data.settings.lastClassId;
+    const yearClasses = data.classes[selectedYear || availableYears[availableYears.length - 1]] || [];
+    return lastClassId && yearClasses.some(c => c.id === lastClassId) ? lastClassId : (yearClasses[0]?.id || '');
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
@@ -261,6 +273,13 @@ export default function App() {
     localStorage.setItem('smartgrade_data', JSON.stringify(data));
   }, [data]);
 
+  useEffect(() => {
+    const yearClasses = data.classes[selectedYear] || [];
+    if (selectedClassId && !yearClasses.some(c => c.id === selectedClassId)) {
+      setSelectedClassId(yearClasses[0]?.id || '');
+    }
+  }, [selectedYear, data.classes]);
+
   const recordHistory = (studentId: string, type: any, oldVal: any, newVal: any) => {
     const record = {
       id: Math.random().toString(36).substr(2, 9),
@@ -276,7 +295,8 @@ export default function App() {
     }));
   };
 
-  const activeClass = data.classes.find(c => c.id === selectedClassId);
+  const currentClasses = data.classes[selectedYear] || [];
+  const activeClass = currentClasses.find(c => c.id === selectedClassId);
   const classStudents = selectedClassId ? (data.students[selectedClassId] || []) : [];
   const gradeKey = `${selectedYear}_${selectedSemester}_${selectedSubject}_${selectedClassId}`;
   
@@ -700,7 +720,10 @@ export default function App() {
   };
 
   const handleBulkComment = () => {
-    const templates = data.settings.commentTemplates || [];
+    const templates = (data.settings.commentTemplates || []).filter(t => 
+      (!t.gradeLevel || t.gradeLevel === activeClass?.gradeLevel) && 
+      (!t.subject || t.subject === selectedSubject)
+    );
 
     Swal.fire({
       title: 'Thiết lập nhận xét hàng loạt',
@@ -718,14 +741,14 @@ export default function App() {
               <select id="bulk-target" class="swal2-select !m-0 !w-full text-sm">
                 <option value="current">Lớp hiện tại</option>
                 <option value="grade">Cùng khối lớp (${activeClass?.gradeLevel || '?'})</option>
-                <option value="all">Tất cả các lớp</option>
+                <option value="all">Tất cả các lớp (${selectedYear})</option>
               </select>
             </div>
           </div>
           
           ${templates.length > 0 ? `
           <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
-            <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Nhận xét đã lưu (Nhấn để chọn)</p>
+            <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Gợi ý từ danh mục (${templates.length})</p>
             <div class="max-h-32 overflow-y-auto space-y-1 pr-2">
               ${templates.map((t, i) => `
                 <button type="button" 
@@ -773,16 +796,22 @@ export default function App() {
           if (saveTemplate) {
             const existing = newSettings.commentTemplates || [];
             if (!existing.find(e => e.comment === comment && e.rangeIdx === rangeIdx)) {
-              newSettings.commentTemplates = [...existing, { rangeIdx, comment }];
+              newSettings.commentTemplates = [...existing, { 
+                rangeIdx, 
+                comment, 
+                subject: selectedSubject, 
+                gradeLevel: activeClass?.gradeLevel 
+              }];
             }
           }
           
           // Xác định các lớp cần áp dụng
+          const yearClasses = prev.classes[selectedYear] || [];
           let targetClasses = [selectedClassId];
           if (target === 'grade') {
-            targetClasses = prev.classes.filter(c => c.gradeLevel === activeClass?.gradeLevel).map(c => c.id);
+            targetClasses = yearClasses.filter(c => c.gradeLevel === activeClass?.gradeLevel).map(c => c.id);
           } else if (target === 'all') {
-            targetClasses = prev.classes.map(c => c.id);
+            targetClasses = yearClasses.map(c => c.id);
           }
 
           targetClasses.forEach(cId => {
@@ -1274,11 +1303,11 @@ export default function App() {
                     if (result.isConfirmed) {
                       const newId = Math.random().toString(36).substr(2, 9);
                       setData(prev => {
-                        const newClasses = [...prev.classes, { id: newId, name: result.value.name, gradeLevel: result.value.grade, subject: '' }]
+                        const yearClasses = [...(prev.classes[selectedYear] || []), { id: newId, name: result.value.name, gradeLevel: result.value.grade, subject: '' }]
                           .sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name));
                         return {
                           ...prev,
-                          classes: newClasses,
+                          classes: { ...prev.classes, [selectedYear]: yearClasses },
                           students: { ...prev.students, [newId]: [] },
                           grades: { ...prev.grades, [newId]: [] }
                         };
@@ -1295,7 +1324,7 @@ export default function App() {
               </button>
             </div>
             <div className="space-y-4">
-              {Object.entries(data.classes.reduce((acc, cls) => {
+              {Object.entries(currentClasses.reduce((acc, cls) => {
                 const grade = cls.gradeLevel || 'Khác';
                 if (!acc[grade]) acc[grade] = [];
                 acc[grade].push(cls);
@@ -1343,9 +1372,9 @@ export default function App() {
                         }).then((result) => {
                           if (result.isConfirmed) {
                             setData(prev => {
-                              const newClasses = prev.classes.map(c => c.id === cls.id ? { ...c, name: result.value.name, gradeLevel: result.value.grade } : c)
+                              const yearClasses = (prev.classes[selectedYear] || []).map(c => c.id === cls.id ? { ...c, name: result.value.name, gradeLevel: result.value.grade } : c)
                                 .sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name));
-                              return { ...prev, classes: newClasses };
+                              return { ...prev, classes: { ...prev.classes, [selectedYear]: yearClasses } };
                             });
                           } else if (result.isDenied) {
                             Swal.fire({
@@ -1359,14 +1388,14 @@ export default function App() {
                             }).then(delRes => {
                               if (delRes.isConfirmed) {
                                 setData(prev => {
-                                  const newClasses = prev.classes.filter(c => c.id !== cls.id);
+                                  const yearClasses = (prev.classes[selectedYear] || []).filter(c => c.id !== cls.id);
                                   const newStudents = { ...prev.students };
                                   delete newStudents[cls.id];
                                   const newGrades = { ...prev.grades };
                                   delete newGrades[cls.id];
-                                  return { ...prev, classes: newClasses, students: newStudents, grades: newGrades };
+                                  return { ...prev, classes: { ...prev.classes, [selectedYear]: yearClasses }, students: newStudents, grades: newGrades };
                                 });
-                                setSelectedClassId(data.classes.find(c => c.id !== cls.id)?.id || '');
+                                setSelectedClassId(currentClasses.find(c => c.id !== cls.id)?.id || '');
                               }
                             });
                           }
@@ -2209,7 +2238,7 @@ export default function App() {
                         className="border border-slate-200 rounded-lg px-2 py-1 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
                       >
                         <option value="">Tất cả</option>
-                        {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        {(data.classes[historyFilterYear || selectedYear] || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </div>
                   </div>
@@ -2232,76 +2261,91 @@ export default function App() {
                           const student = Object.values(data.students).flat().find(s => s.id === h.studentId);
                           const nameMatch = student?.name.toLowerCase().includes(searchQuery.toLowerCase());
                           const deleteMatch = showDeletedHistory ? true : !h.isDeleted;
+                          
                           return nameMatch && deleteMatch;
                         });
 
-                        return filtered.map((item) => {
-                          const student = Object.values(data.students).flat().find(s => s.id === item.studentId);
+                        const grouped: Record<string, any[]> = {};
+                        filtered.forEach(h => {
+                          if (!grouped[h.studentId]) grouped[h.studentId] = [];
+                          grouped[h.studentId].push(h);
+                        });
+
+                        return Object.entries(grouped).map(([studentId, records]) => {
+                          const student = Object.values(data.students).flat().find(s => s.id === studentId);
+                          const latest = records[0];
+                          const changeCount = records.length;
+                          
                           return (
-                            <tr key={item.id} className={`group hover:bg-slate-50/50 transition-colors ${item.isDeleted ? 'bg-slate-50 opacity-60' : ''}`}>
+                            <tr key={studentId} className="group hover:bg-slate-50/50 transition-colors">
                               <td className="px-6 py-4 text-xs text-slate-500 font-medium">
-                                {dayjs(item.timestamp).format('HH:mm - DD/MM/YYYY')}
+                                {dayjs(latest.timestamp).format('HH:mm - DD/MM/YYYY')}
+                                {changeCount > 1 && <p className="text-[10px] text-blue-500 font-bold mt-1">+{changeCount - 1} thay đổi khác</p>}
                               </td>
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-2">
                                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${student?.gender === 'Nam' ? 'bg-blue-400' : 'bg-rose-400'}`}>
                                     {student?.name.charAt(0)}
                                   </div>
-                                  <span className="font-bold text-slate-700">{student?.name || 'HS đã xóa'}</span>
+                                  <div>
+                                    <span className="font-bold text-slate-700">{student?.name || 'HS đã xóa'}</span>
+                                    <p className="text-[10px] text-slate-400 italic">Mã: {student?.code || 'N/A'}</p>
+                                  </div>
                                 </div>
                               </td>
                               <td className="px-6 py-4 text-center">
                                 <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase">
-                                  {item.type}
+                                  {latest.type}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-center text-sm text-slate-400 italic">
-                                {item.oldValue}
+                                {latest.oldValue}
                               </td>
                               <td className="px-6 py-4 text-center">
-                                <span className="font-black text-slate-900">{item.newValue}</span>
+                                <span className="font-black text-slate-900">{latest.newValue}</span>
                               </td>
                               <td className="px-6 py-4 text-center">
                                 <div className="flex items-center justify-center gap-2">
-                                  {!item.isDeleted ? (
-                                    <button 
-                                      onClick={() => {
-                                        setData(prev => ({
-                                          ...prev,
-                                          history: prev.history.map(h => h.id === item.id ? { ...h, isDeleted: true } : h)
-                                        }));
-                                      }}
-                                      className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-all"
-                                      title="Tạm ẩn"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                  ) : (
-                                    <>
-                                      <button 
-                                        onClick={() => {
-                                          setData(prev => ({
-                                            ...prev,
-                                            history: prev.history.map(h => h.id === item.id ? { ...h, isDeleted: false } : h)
-                                          }));
-                                        }}
-                                        className="text-[10px] font-bold text-emerald-600 hover:underline"
-                                      >
-                                        Khôi phục
-                                      </button>
-                                      <button 
-                                        onClick={() => {
-                                          setData(prev => ({
-                                            ...prev,
-                                            history: prev.history.filter(h => h.id !== item.id)
-                                          }));
-                                        }}
-                                        className="text-[10px] font-bold text-rose-600 hover:underline ml-2"
-                                      >
-                                        Xóa hẳn
-                                      </button>
-                                    </>
-                                  )}
+                                  <button 
+                                    onClick={() => {
+                                      Swal.fire({
+                                        title: `Chi tiết thay đổi: ${student?.name}`,
+                                        html: `
+                                          <div class="max-h-96 overflow-y-auto text-left space-y-2 p-2">
+                                            ${records.map(r => `
+                                              <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center ${r.isDeleted ? 'opacity-40 grayscale' : ''}">
+                                                <div>
+                                                  <p class="text-[10px] font-bold text-slate-400 uppercase">${dayjs(r.timestamp).format('HH:mm - DD/MM/YYYY')}</p>
+                                                  <p class="text-sm font-bold text-slate-700">${r.type}</p>
+                                                </div>
+                                                <div class="text-right">
+                                                  <p class="text-xs text-slate-400 italic">${r.oldValue} →</p>
+                                                  <p class="text-sm font-black text-blue-600">${r.newValue}</p>
+                                                </div>
+                                              </div>
+                                            `).join('')}
+                                          </div>
+                                        `,
+                                        confirmButtonText: 'Đóng'
+                                      });
+                                    }}
+                                    className="p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
+                                    title="Xem chi tiết"
+                                  >
+                                    <ChevronRight size={18} />
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      setData(prev => ({
+                                        ...prev,
+                                        history: prev.history.map(h => h.studentId === studentId ? { ...h, isDeleted: true } : h)
+                                      }));
+                                    }}
+                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-all"
+                                    title="Ẩn tất cả của HS này"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -2347,6 +2391,22 @@ export default function App() {
                             <select id="tpl-range" class="swal2-select !m-0 !w-full">
                               ${SCORE_RANGES.map((r, i) => `<option value="${i}">${r.label}</option>`).join('')}
                             </select>
+                            <div class="grid grid-cols-2 gap-3 mt-4">
+                               <div>
+                                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Khối lớp</label>
+                                 <select id="tpl-grade" class="swal2-select !m-0 !w-full">
+                                   <option value="">Tất cả</option>
+                                   ${['6', '7', '8', '9'].map(g => `<option value="${g}" ${activeClass?.gradeLevel === g ? 'selected' : ''}>Khối ${g}</option>`).join('')}
+                                 </select>
+                               </div>
+                               <div>
+                                 <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Môn học</label>
+                                 <select id="tpl-subject" class="swal2-select !m-0 !w-full">
+                                   <option value="">Tất cả</option>
+                                   ${DEFAULT_SUBJECTS.map(s => `<option value="${s}" ${selectedSubject === s ? 'selected' : ''}>${s}</option>`).join('')}
+                                 </select>
+                               </div>
+                             </div>
                           </div>
                         `,
                         showCancelButton: true,
@@ -2355,8 +2415,10 @@ export default function App() {
                         preConfirm: () => {
                           const comment = (document.getElementById('tpl-comment') as HTMLTextAreaElement).value;
                           const rangeIdx = parseInt((document.getElementById('tpl-range') as HTMLSelectElement).value);
+                          const gradeLevel = (document.getElementById('tpl-grade') as HTMLSelectElement).value;
+                          const subject = (document.getElementById('tpl-subject') as HTMLSelectElement).value;
                           if (!comment) Swal.showValidationMessage('Vui lòng nhập nội dung');
-                          return { comment, rangeIdx };
+                          return { comment, rangeIdx, gradeLevel, subject };
                         }
                       }).then(res => {
                         if (res.isConfirmed) {
@@ -2364,7 +2426,7 @@ export default function App() {
                             ...prev,
                             settings: {
                               ...prev.settings,
-                              commentTemplates: [...(prev.settings.commentTemplates || []), { ...res.value, subject: selectedSubject, gradeLevel: activeClass?.gradeLevel }]
+                              commentTemplates: [...(prev.settings.commentTemplates || []), res.value]
                             }
                           }));
                           Swal.fire('Thành công', 'Đã thêm mẫu nhận xét!', 'success');
