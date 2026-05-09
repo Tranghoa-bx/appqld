@@ -101,9 +101,10 @@ const ALL_COLUMNS = [
 
 const INITIAL_DATA: AppData = {
   classes: [
-    { id: '9a1', name: 'Lớp 9A1', subject: 'Toán học' },
-    { id: '9a2', name: 'Lớp 9A2', subject: 'Ngữ văn' },
-  ],
+    { id: '9a1', name: 'Lớp 9A1', gradeLevel: '9', subject: 'Toán học' },
+    { id: '9a2', name: 'Lớp 9A2', gradeLevel: '9', subject: 'Ngữ văn' },
+    { id: '6a1', name: 'Lớp 6A1', gradeLevel: '6', subject: 'Toán học' },
+  ].sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name)),
   students: {
     '9a1': [
       { id: 's1', code: '2024001', name: 'Nguyễn Văn An', gender: 'Nam', birthday: '2010-05-15' },
@@ -684,16 +685,35 @@ export default function App() {
   };
 
   const handleBulkComment = () => {
+    const SCORE_RANGES = [
+      { label: '0 <= Điểm <= 3.4', min: 0, max: 3.4 },
+      { label: '3.5 <= Điểm <= 4.9', min: 3.5, max: 4.9 },
+      { label: '5 <= Điểm <= 5.9', min: 5, max: 5.9 },
+      { label: '6 <= Điểm <= 6.9', min: 6, max: 6.9 },
+      { label: '7 <= Điểm <= 7.4', min: 7, max: 7.4 },
+      { label: '7.5 <= Điểm <= 7.9', min: 7.5, max: 7.9 },
+      { label: '8 <= Điểm <= 8.9', min: 8, max: 8.9 },
+      { label: '9 <= Điểm <= 10', min: 9, max: 10 },
+    ];
+
     Swal.fire({
-      title: 'Nhập nhận xét theo khoảng điểm',
+      title: 'Thiết lập nhận xét hàng loạt',
       html: `
         <div class="space-y-4 text-left p-2">
-          <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Khoảng điểm</label>
-            <div class="flex items-center gap-2">
-              <input id="bulk-min" type="number" step="0.1" placeholder="Min" class="swal2-input !m-0 !w-full" value="8">
-              <span>đến</span>
-              <input id="bulk-max" type="number" step="0.1" placeholder="Max" class="swal2-input !m-0 !w-full" value="10">
+          <div class="grid grid-cols-2 gap-3">
+             <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Khoảng điểm</label>
+              <select id="bulk-range" class="swal2-select !m-0 !w-full text-sm">
+                ${SCORE_RANGES.map((r, i) => `<option value="${i}">${r.label}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Áp dụng cho</label>
+              <select id="bulk-target" class="swal2-select !m-0 !w-full text-sm">
+                <option value="current">Lớp hiện tại</option>
+                <option value="grade">Cùng khối lớp (${activeClass?.gradeLevel || '?'})</option>
+                <option value="all">Tất cả các lớp</option>
+              </select>
             </div>
           </div>
           <div>
@@ -703,40 +723,83 @@ export default function App() {
         </div>
       `,
       showCancelButton: true,
-      confirmButtonText: 'Áp dụng cho lớp',
+      confirmButtonText: 'Cập nhật',
       cancelButtonText: 'Hủy',
       preConfirm: () => {
-        const min = parseFloat((document.getElementById('bulk-min') as HTMLInputElement).value);
-        const max = parseFloat((document.getElementById('bulk-max') as HTMLInputElement).value);
+        const rangeIdx = parseInt((document.getElementById('bulk-range') as HTMLSelectElement).value);
+        const target = (document.getElementById('bulk-target') as HTMLSelectElement).value;
         const comment = (document.getElementById('bulk-comment') as HTMLTextAreaElement).value;
-        if (isNaN(min) || isNaN(max)) Swal.showValidationMessage('Vui lòng nhập khoảng điểm hợp lệ');
         if (!comment) Swal.showValidationMessage('Vui lòng nhập nội dung nhận xét');
-        return { min, max, comment };
+        return { range: SCORE_RANGES[rangeIdx], target, comment };
       }
     }).then(result => {
       if (result.isConfirmed) {
-        const { min, max, comment } = result.value;
+        const { range, target, comment } = result.value;
         setData(prev => {
           const newGrades = { ...prev.grades };
-          const classGrades = [...(newGrades[gradeKey] || [])];
           
-          classStudents.forEach(s => {
-            const gIdx = classGrades.findIndex(g => g.studentId === s.id);
-            const g = gIdx !== -1 ? classGrades[gIdx] : { studentId: s.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 };
-            const avg = calculateAverage(g);
-            
-            if (avg >= min && avg <= max) {
-              if (gIdx !== -1) {
-                classGrades[gIdx] = { ...g, manualComment: comment };
-              } else {
-                classGrades.push({ ...g, manualComment: comment });
+          // Xác định các lớp cần áp dụng
+          let targetClasses = [selectedClassId];
+          if (target === 'grade') {
+            targetClasses = prev.classes.filter(c => c.gradeLevel === activeClass?.gradeLevel).map(c => c.id);
+          } else if (target === 'all') {
+            targetClasses = prev.classes.map(c => c.id);
+          }
+
+          targetClasses.forEach(cId => {
+            const key = `${selectedYear}_${selectedSemester}_${selectedSubject}_${cId}`;
+            const classGrades = [...(newGrades[key] || [])];
+            const students = prev.students[cId] || [];
+
+            students.forEach(s => {
+              const gIdx = classGrades.findIndex(g => g.studentId === s.id);
+              const g = gIdx !== -1 ? classGrades[gIdx] : { studentId: s.id, oral: [], m15: [], h1: [], semester: null, bonusTotal: 0, penaltyTotal: 0 };
+              const avg = calculateAverage(g);
+              
+              if (avg >= range.min && avg <= range.max) {
+                if (gIdx !== -1) {
+                  classGrades[gIdx] = { ...g, manualComment: comment };
+                } else {
+                  classGrades.push({ ...g, manualComment: comment });
+                }
               }
-            }
+            });
+            newGrades[key] = classGrades;
           });
           
-          return { ...prev, grades: { ...prev.grades, [gradeKey]: classGrades } };
+          return { ...prev, grades: newGrades };
         });
-        Swal.fire('Thành công', 'Đã cập nhật nhận xét cho các học sinh đạt điều kiện!', 'success');
+        Swal.fire('Thành công', 'Đã cập nhật nhận xét thành công!', 'success');
+      }
+    });
+  };
+
+  const handlePasteToColumn = (colId: string) => {
+    Swal.fire({
+      title: `Dán điểm cho cột ${colId.toUpperCase()}`,
+      html: `
+        <p class="text-xs text-slate-500 mb-2">Mỗi điểm một dòng theo đúng thứ tự danh sách lớp.</p>
+        <textarea id="paste-input" class="swal2-textarea !m-0 !w-full !h-48" placeholder="Dán dữ liệu từ Excel..."></textarea>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Thực hiện',
+      cancelButtonText: 'Hủy',
+      preConfirm: () => {
+        return (document.getElementById('paste-input') as HTMLTextAreaElement).value;
+      }
+    }).then(result => {
+      if (result.isConfirmed && result.value) {
+        const rows = result.value.split('\n').map(r => r.trim()).filter(r => r !== '');
+        setDraftGrades(prev => {
+          const newDraft = { ...prev };
+          classStudents.forEach((s, idx) => {
+            if (rows[idx]) {
+              newDraft[s.id] = { ...(newDraft[s.id] || {}), [colId]: rows[idx] };
+            }
+          });
+          return newDraft;
+        });
+        Swal.fire('Thành công', `Đã nhập nháp ${rows.length} điểm cho cột ${colId.toUpperCase()}. Nhớ nhấn "Lưu điểm" để hoàn tất.`, 'success');
       }
     });
   };
@@ -1110,6 +1173,7 @@ export default function App() {
                     title: 'Thêm lớp học mới',
                     html: `
                       <input id="swal-class-name" class="swal2-input" placeholder="Tên lớp (VD: 9A1)">
+                      <input id="swal-class-grade" class="swal2-input" placeholder="Khối (VD: 6, 7, 8, 9)">
                     `,
                     focusConfirm: false,
                     showCancelButton: true,
@@ -1117,20 +1181,25 @@ export default function App() {
                     cancelButtonText: 'Hủy',
                     preConfirm: () => {
                       const name = (document.getElementById('swal-class-name') as HTMLInputElement).value;
+                      const grade = (document.getElementById('swal-class-grade') as HTMLInputElement).value;
                       if (!name) {
                         Swal.showValidationMessage('Vui lòng nhập tên lớp');
                       }
-                      return { name };
+                      return { name, grade };
                     }
                   }).then((result) => {
                     if (result.isConfirmed) {
                       const newId = Math.random().toString(36).substr(2, 9);
-                      setData(prev => ({
-                        ...prev,
-                        classes: [...prev.classes, { id: newId, name: result.value.name, subject: '' }],
-                        students: { ...prev.students, [newId]: [] },
-                        grades: { ...prev.grades, [newId]: [] }
-                      }));
+                      setData(prev => {
+                        const newClasses = [...prev.classes, { id: newId, name: result.value.name, gradeLevel: result.value.grade, subject: '' }]
+                          .sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name));
+                        return {
+                          ...prev,
+                          classes: newClasses,
+                          students: { ...prev.students, [newId]: [] },
+                          grades: { ...prev.grades, [newId]: [] }
+                        };
+                      });
                       setSelectedClassId(newId);
                       setActiveTab('grading');
                     }
@@ -1142,8 +1211,16 @@ export default function App() {
                 <Plus size={14} />
               </button>
             </div>
-            <div className="space-y-1">
-              {data.classes.map(cls => (
+            <div className="space-y-4">
+              {Object.entries(data.classes.reduce((acc, cls) => {
+                const grade = cls.gradeLevel || 'Khác';
+                if (!acc[grade]) acc[grade] = [];
+                acc[grade].push(cls);
+                return acc;
+              }, {} as Record<string, ClassRoom[]>)).sort(([a], [b]) => a.localeCompare(b)).map(([grade, classes]) => (
+                <div key={grade} className="space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-1">Khối {grade}</p>
+                  {classes.map(cls => (
                 <div key={cls.id} className="relative group">
                   <button
                     onClick={() => { 
@@ -1166,6 +1243,7 @@ export default function App() {
                           title: 'Chỉnh sửa lớp học',
                           html: `
                             <input id="swal-edit-name" class="swal2-input" value="${cls.name}" placeholder="Tên lớp">
+                            <input id="swal-edit-grade" class="swal2-input" value="${cls.gradeLevel || ''}" placeholder="Khối">
                           `,
                           showCancelButton: true,
                           showDenyButton: true,
@@ -1175,15 +1253,17 @@ export default function App() {
                           denyButtonColor: '#ef4444',
                           preConfirm: () => {
                             const name = (document.getElementById('swal-edit-name') as HTMLInputElement).value;
+                            const grade = (document.getElementById('swal-edit-grade') as HTMLInputElement).value;
                             if (!name) Swal.showValidationMessage('Vui lòng nhập tên lớp');
-                            return { name };
+                            return { name, grade };
                           }
                         }).then((result) => {
                           if (result.isConfirmed) {
-                            setData(prev => ({
-                              ...prev,
-                              classes: prev.classes.map(c => c.id === cls.id ? { ...c, name: result.value.name } : c)
-                            }));
+                            setData(prev => {
+                              const newClasses = prev.classes.map(c => c.id === cls.id ? { ...c, name: result.value.name, gradeLevel: result.value.grade } : c)
+                                .sort((a, b) => (a.gradeLevel || '').localeCompare(b.gradeLevel || '') || a.name.localeCompare(b.name));
+                              return { ...prev, classes: newClasses };
+                            });
                           } else if (result.isDenied) {
                             Swal.fire({
                               title: 'Xóa lớp học?',
@@ -1215,6 +1295,8 @@ export default function App() {
                       <SettingsIcon size={14} />
                     </button>
                   )}
+                </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -1454,12 +1536,66 @@ export default function App() {
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
                         {(data.settings.visibleColumns || []).includes('code') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Mã HS</th>}
                         {(data.settings.visibleColumns || []).includes('birthday') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Ngày sinh</th>}
-                        {(data.settings.visibleColumns || []).includes('tx1') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX1</th>}
-                        {(data.settings.visibleColumns || []).includes('tx2') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX2</th>}
-                        {(data.settings.visibleColumns || []).includes('tx3') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX3</th>}
-                        {(data.settings.visibleColumns || []).includes('tx4') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">TX4</th>}
-                        {(data.settings.visibleColumns || []).includes('h1') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Giữa Kỳ (x2)</th>}
-                        {(data.settings.visibleColumns || []).includes('semester') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Cuối Kỳ (x3)</th>}
+                        {(data.settings.visibleColumns || []).includes('tx1') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
+                            <div className="flex items-center justify-center gap-1">
+                              TX1
+                              <button onClick={() => handlePasteToColumn('tx1')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('tx2') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
+                            <div className="flex items-center justify-center gap-1">
+                              TX2
+                              <button onClick={() => handlePasteToColumn('tx2')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('tx3') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
+                            <div className="flex items-center justify-center gap-1">
+                              TX3
+                              <button onClick={() => handlePasteToColumn('tx3')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('tx4') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
+                            <div className="flex items-center justify-center gap-1">
+                              TX4
+                              <button onClick={() => handlePasteToColumn('tx4')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('h1') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
+                            <div className="flex items-center justify-center gap-1">
+                              Giữa Kỳ
+                              <button onClick={() => handlePasteToColumn('h1')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('semester') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
+                            <div className="flex items-center justify-center gap-1">
+                              Cuối Kỳ
+                              <button onClick={() => handlePasteToColumn('semester')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
                         {(data.settings.visibleColumns || []).includes('bonus') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30">Cộng (+)</th>}
                         {(data.settings.visibleColumns || []).includes('penalty') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>}
                         {(data.settings.visibleColumns || []).includes('net') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>}
