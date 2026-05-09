@@ -82,6 +82,17 @@ const stripAiSpecialChars = (text: string) => {
     .trim();
 };
 
+const SCORE_RANGES = [
+  { label: '0 <= Điểm <= 3.4', min: 0, max: 3.4 },
+  { label: '3.5 <= Điểm <= 4.9', min: 3.5, max: 4.9 },
+  { label: '5 <= Điểm <= 5.9', min: 5, max: 5.9 },
+  { label: '6 <= Điểm <= 6.9', min: 6, max: 6.9 },
+  { label: '7 <= Điểm <= 7.4', min: 7, max: 7.4 },
+  { label: '7.5 <= Điểm <= 7.9', min: 7.5, max: 7.9 },
+  { label: '8 <= Điểm <= 8.9', min: 8, max: 8.9 },
+  { label: '9 <= Điểm <= 10', min: 9, max: 10 },
+];
+
 const ALL_COLUMNS = [
   { id: 'code', name: 'Mã HS' },
   { id: 'name', name: 'Họ và Tên' },
@@ -226,7 +237,7 @@ export default function App() {
 
   const availableYears = data.settings.schoolYears || DEFAULT_YEARS;
   
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'grading' | 'settings' | 'history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'grading' | 'settings' | 'history' | 'templates'>('dashboard');
   const [selectedYear, setSelectedYear] = useState(data.settings.lastYear || availableYears[availableYears.length - 1]);
   const [selectedSemester, setSelectedSemester] = useState(data.settings.lastSemester || 'HK1');
   const [selectedSubject, setSelectedSubject] = useState(data.settings.lastSubject || 'Toán');
@@ -237,6 +248,7 @@ export default function App() {
   const [showRankId, setShowRankId] = useState<string | null>(null);
 
   const [draftGrades, setDraftGrades] = useState<Record<string, Record<string, string>>>({});
+  const [showDeletedHistory, setShowDeletedHistory] = useState(false);
   const [historyFilterYear, setHistoryFilterYear] = useState('');
   const [historyFilterClass, setHistoryFilterClass] = useState('');
   const [historyFilterSemester, setHistoryFilterSemester] = useState('');
@@ -688,16 +700,6 @@ export default function App() {
   };
 
   const handleBulkComment = () => {
-    const SCORE_RANGES = [
-      { label: '0 <= Điểm <= 3.4', min: 0, max: 3.4 },
-      { label: '3.5 <= Điểm <= 4.9', min: 3.5, max: 4.9 },
-      { label: '5 <= Điểm <= 5.9', min: 5, max: 5.9 },
-      { label: '6 <= Điểm <= 6.9', min: 6, max: 6.9 },
-      { label: '7 <= Điểm <= 7.4', min: 7, max: 7.4 },
-      { label: '7.5 <= Điểm <= 7.9', min: 7.5, max: 7.9 },
-      { label: '8 <= Điểm <= 8.9', min: 8, max: 8.9 },
-      { label: '9 <= Điểm <= 10', min: 9, max: 10 },
-    ];
     const templates = data.settings.commentTemplates || [];
 
     Swal.fire({
@@ -852,6 +854,28 @@ export default function App() {
           });
           Swal.fire('Thành công', `Đã nhập nháp ${rows.length} giá trị cho cột ${colId.toUpperCase()}. Nhớ nhấn "Lưu điểm" để hoàn tất.`, 'success');
         }
+      }
+    });
+  };
+
+  const handleArchiveTerm = () => {
+    Swal.fire({
+      title: 'Chốt điểm kỳ học?',
+      text: 'Hệ thống sẽ lưu lại bản sao điểm Cộng, Trừ, Ròng và ĐTB hiện tại của toàn bộ học sinh để phục vụ báo cáo tổng kết. Bản sao này sẽ được lưu giữ độc lập.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Đồng ý chốt',
+      cancelButtonText: 'Hủy',
+      confirmButtonColor: '#3b82f6'
+    }).then(result => {
+      if (result.isConfirmed) {
+        setData(prev => {
+          const archived = { ...(prev.archivedGrades || {}) };
+          const archiveKey = `${selectedYear}_${selectedSemester}_${selectedSubject}_${selectedClassId}`;
+          archived[archiveKey] = JSON.parse(JSON.stringify(prev.grades[gradeKey] || []));
+          return { ...prev, archivedGrades: archived };
+        });
+        Swal.fire('Thành công', 'Đã lưu trữ dữ liệu chốt kỳ học!', 'success');
       }
     });
   };
@@ -1213,6 +1237,13 @@ export default function App() {
                 <History size={20} />
                 <span>Lịch sử thay đổi</span>
               </button>
+              <button 
+                onClick={() => setActiveTab('templates')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'templates' ? 'bg-blue-50 text-blue-600 font-semibold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                <ClipboardList size={20} />
+                <span>Danh mục nhận xét</span>
+              </button>
             </div>
           </div>
 
@@ -1491,6 +1522,16 @@ export default function App() {
                   >
                     {DEFAULT_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
+                </div>
+
+                <div className="ml-auto">
+                  <button 
+                    onClick={handleArchiveTerm}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all text-sm font-bold shadow-lg shadow-emerald-100"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>Chốt điểm kỳ học</span>
+                  </button>
                 </div>
               </div>
 
@@ -2107,34 +2148,47 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-6"
             >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Lịch sử thay đổi điểm</h2>
+                  <p className="text-sm text-slate-500">Toàn bộ các thao tác chỉnh sửa điểm số được ghi lại tại đây</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-xl cursor-pointer hover:bg-slate-200 transition-colors">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      checked={showDeletedHistory}
+                      onChange={(e) => setShowDeletedHistory(e.target.checked)}
+                    />
+                    <span className="text-xs font-bold text-slate-600">Hiện bản ghi đã xóa</span>
+                  </label>
+                  <button 
+                    onClick={() => {
+                      Swal.fire({
+                        title: 'Xóa vĩnh viễn?',
+                        text: 'Tất cả các bản ghi lịch sử sẽ bị xóa sạch hoàn toàn.',
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonColor: '#ef4444',
+                        confirmButtonText: 'Xóa vĩnh viễn'
+                      }).then(res => {
+                        if (res.isConfirmed) {
+                          setData(prev => ({ ...prev, history: [] }));
+                          Swal.fire('Đã xóa', 'Lịch sử đã được dọn sạch.', 'success');
+                        }
+                      });
+                    }}
+                    className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                    title="Xóa vĩnh viễn toàn bộ lịch sử"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-white rounded-3xl border border-slate-200 card-shadow overflow-hidden">
                 <div className="p-6 border-b border-slate-100">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                      <Clock size={20} className="text-blue-500" />
-                      Lịch sử thay đổi
-                    </h3>
-                    <button 
-                      onClick={() => {
-                        Swal.fire({
-                          title: 'Xóa toàn bộ nhật ký?',
-                          text: 'Lịch sử thay đổi điểm sẽ bị xóa vĩnh viễn!',
-                          icon: 'warning',
-                          showCancelButton: true,
-                          confirmButtonColor: '#ef4444',
-                          confirmButtonText: 'Xóa hết',
-                          cancelButtonText: 'Hủy'
-                        }).then(res => {
-                          if (res.isConfirmed) {
-                            setData(prev => ({ ...prev, history: [] }));
-                          }
-                        });
-                      }}
-                      className="text-xs text-rose-500 font-bold hover:underline"
-                    >
-                      Xóa nhật ký
-                    </button>
-                  </div>
                   <div className="flex flex-wrap gap-3">
                     <div className="flex items-center gap-2">
                       <label className="text-xs font-semibold text-slate-500">Năm học:</label>
@@ -2158,122 +2212,39 @@ export default function App() {
                         {data.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-slate-500">Kỳ:</label>
-                      <select
-                        value={historyFilterSemester}
-                        onChange={e => setHistoryFilterSemester(e.target.value)}
-                        className="border border-slate-200 rounded-lg px-2 py-1 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      >
-                        <option value="">Tất cả</option>
-                        {AVAILABLE_SEMESTERS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </div>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50/80 border-b border-slate-200 text-center">
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Thời gian</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Học sinh</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Loại điểm</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Giá trị cũ</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Giá trị mới</th>
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-40">Thời gian</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Học sinh</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Loại điểm</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Giá trị cũ</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Giá trị mới</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {(() => {
-                        const allStudents = Object.values(data.students).flat() as Student[];
-                        // Students belonging to selected class filter
-                        const classStudentIds = historyFilterClass
-                          ? new Set((data.students[historyFilterClass] || []).map(s => s.id))
-                          : null;
-                        const filteredHistory = data.history.filter(h => {
-                          const studentName = allStudents.find(s => s.id === h.studentId)?.name || '';
-                          const nameMatch = studentName.toLowerCase().includes(searchQuery.toLowerCase());
-                          const classMatch = !classStudentIds || classStudentIds.has(h.studentId);
-                          // Year/semester filter: check gradeKey entries that match
-                          let yearMatch = true;
-                          let semesterMatch = true;
-                          if (historyFilterYear || historyFilterSemester) {
-                            const relevantKeys = Object.keys(data.grades).filter(k => {
-                              const parts = k.split('_');
-                              if (parts.length < 4) return false;
-                              const [yr, sem, , clsId] = parts;
-                              return (!historyFilterYear || yr === historyFilterYear) &&
-                                     (!historyFilterSemester || sem === historyFilterSemester) &&
-                                     (!historyFilterClass || clsId === historyFilterClass);
-                            });
-                            const relevantStudentIds = new Set(
-                              relevantKeys.flatMap(k => (data.grades[k] || []).map(g => g.studentId))
-                            );
-                            yearMatch = relevantStudentIds.has(h.studentId);
-                            semesterMatch = true; // already factored in above
-                          }
-                          return nameMatch && classMatch && yearMatch && semesterMatch;
+                        const filtered = data.history.filter(h => {
+                          const student = Object.values(data.students).flat().find(s => s.id === h.studentId);
+                          const nameMatch = student?.name.toLowerCase().includes(searchQuery.toLowerCase());
+                          const deleteMatch = showDeletedHistory ? true : !h.isDeleted;
+                          return nameMatch && deleteMatch;
                         });
 
-                        // Group by student so each student appears only once
-                        const studentGroups = filteredHistory.reduce((acc, h) => {
-                          if (!acc[h.studentId]) {
-                            acc[h.studentId] = h; // Keep the latest change (history is ordered newest first)
-                          }
-                          return acc;
-                        }, {} as Record<string, HistoryRecord>);
-
-                        const displayedHistory = Object.values(studentGroups);
-
-                        return displayedHistory.map((item) => {
-                          const student = allStudents.find(s => s.id === item.studentId);
-                          const totalChanges = data.history.filter(h => h.studentId === item.studentId).length;
-
+                        return filtered.map((item) => {
+                          const student = Object.values(data.students).flat().find(s => s.id === item.studentId);
                           return (
-                            <tr key={item.id} 
-                                className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
-                                onClick={() => {
-                                  if (!student) return;
-                                  const studentHistory = data.history.filter(h => h.studentId === student.id);
-                                  const rows = studentHistory.map(h => `
-                                    <tr class="border-b border-slate-100">
-                                      <td class="py-2 text-xs text-slate-500">${dayjs(h.timestamp).format('HH:mm DD/MM')}</td>
-                                      <td class="py-2 text-xs text-center font-semibold text-slate-700">${h.type}</td>
-                                      <td class="py-2 text-xs text-center line-through text-rose-400">${h.oldValue}</td>
-                                      <td class="py-2 text-xs text-center font-bold text-emerald-600">${h.newValue}</td>
-                                    </tr>
-                                  `).join('');
-                                  
-                                  Swal.fire({
-                                    title: `Lịch sử: ${student.name}`,
-                                    html: `
-                                      <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                                        <table class="w-full text-left">
-                                          <thead class="sticky top-0 bg-white">
-                                            <tr>
-                                              <th class="text-xs text-slate-400 font-medium pb-2">Thời gian</th>
-                                              <th class="text-xs text-slate-400 font-medium pb-2 text-center">Loại</th>
-                                              <th class="text-xs text-slate-400 font-medium pb-2 text-center">Cũ</th>
-                                              <th class="text-xs text-slate-400 font-medium pb-2 text-center">Mới</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>${rows}</tbody>
-                                        </table>
-                                      </div>
-                                    `,
-                                    width: '500px',
-                                    confirmButtonText: 'Đóng'
-                                  });
-                                }}
-                            >
+                            <tr key={item.id} className={`group hover:bg-slate-50/50 transition-colors ${item.isDeleted ? 'bg-slate-50 opacity-60' : ''}`}>
                               <td className="px-6 py-4 text-xs text-slate-500 font-medium">
                                 {dayjs(item.timestamp).format('HH:mm - DD/MM/YYYY')}
-                                <div className="text-[10px] text-blue-500 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  Xem chi tiết ${totalChanges} lần sửa
-                                </div>
                               </td>
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-2">
-                                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${student?.gender === 'Nam' ? 'bg-blue-400' : 'bg-rose-400'}`}>
                                     {student?.name.charAt(0)}
                                   </div>
                                   <span className="font-bold text-slate-700">{student?.name || 'HS đã xóa'}</span>
@@ -2290,6 +2261,49 @@ export default function App() {
                               <td className="px-6 py-4 text-center">
                                 <span className="font-black text-slate-900">{item.newValue}</span>
                               </td>
+                              <td className="px-6 py-4 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  {!item.isDeleted ? (
+                                    <button 
+                                      onClick={() => {
+                                        setData(prev => ({
+                                          ...prev,
+                                          history: prev.history.map(h => h.id === item.id ? { ...h, isDeleted: true } : h)
+                                        }));
+                                      }}
+                                      className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-all"
+                                      title="Tạm ẩn"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button 
+                                        onClick={() => {
+                                          setData(prev => ({
+                                            ...prev,
+                                            history: prev.history.map(h => h.id === item.id ? { ...h, isDeleted: false } : h)
+                                          }));
+                                        }}
+                                        className="text-[10px] font-bold text-emerald-600 hover:underline"
+                                      >
+                                        Khôi phục
+                                      </button>
+                                      <button 
+                                        onClick={() => {
+                                          setData(prev => ({
+                                            ...prev,
+                                            history: prev.history.filter(h => h.id !== item.id)
+                                          }));
+                                        }}
+                                        className="text-[10px] font-bold text-rose-600 hover:underline ml-2"
+                                      >
+                                        Xóa hẳn
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                           );
                         });
@@ -2303,6 +2317,134 @@ export default function App() {
                     <p className="font-medium">Chưa có lịch sử thay đổi nào</p>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'templates' && (
+            <motion.div 
+              key="templates"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Danh mục nhận xét</h2>
+                  <p className="text-sm text-slate-500">Quản lý và áp dụng hàng loạt các mẫu nhận xét chuyên nghiệp</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      Swal.fire({
+                        title: 'Thêm mẫu nhận xét mới',
+                        html: `
+                          <div class="text-left">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nội dung nhận xét</label>
+                            <textarea id="tpl-comment" class="swal2-textarea !m-0 !w-full" placeholder="Nhập nội dung..."></textarea>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mt-4 mb-1">Khoảng điểm áp dụng</label>
+                            <select id="tpl-range" class="swal2-select !m-0 !w-full">
+                              ${SCORE_RANGES.map((r, i) => `<option value="${i}">${r.label}</option>`).join('')}
+                            </select>
+                          </div>
+                        `,
+                        showCancelButton: true,
+                        confirmButtonText: 'Thêm mẫu',
+                        cancelButtonText: 'Hủy',
+                        preConfirm: () => {
+                          const comment = (document.getElementById('tpl-comment') as HTMLTextAreaElement).value;
+                          const rangeIdx = parseInt((document.getElementById('tpl-range') as HTMLSelectElement).value);
+                          if (!comment) Swal.showValidationMessage('Vui lòng nhập nội dung');
+                          return { comment, rangeIdx };
+                        }
+                      }).then(res => {
+                        if (res.isConfirmed) {
+                          setData(prev => ({
+                            ...prev,
+                            settings: {
+                              ...prev.settings,
+                              commentTemplates: [...(prev.settings.commentTemplates || []), { ...res.value, subject: selectedSubject, gradeLevel: activeClass?.gradeLevel }]
+                            }
+                          }));
+                          Swal.fire('Thành công', 'Đã thêm mẫu nhận xét!', 'success');
+                        }
+                      });
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold shadow-lg shadow-blue-100"
+                  >
+                    <Plus size={18} /> Thêm mẫu mới
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-3xl border border-slate-200 card-shadow overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-6 py-4 w-10">
+                          <input type="checkbox" className="w-4 h-4 rounded border-slate-300" />
+                        </th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-12 text-center">STT</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nội dung nhận xét</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Khoảng điểm</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Khối/Môn</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(data.settings.commentTemplates || []).map((t, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <input type="checkbox" className="w-4 h-4 rounded border-slate-300" />
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-400 text-center font-mono">{idx + 1}</td>
+                          <td className="px-6 py-4">
+                            <p className="text-sm text-slate-700 font-medium leading-relaxed">{t.comment}</p>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase">
+                              {SCORE_RANGES[t.rangeIdx]?.label || 'Tùy chỉnh'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-bold text-slate-500 uppercase">Khối {t.gradeLevel || '?'}</p>
+                              <p className="text-[9px] text-slate-400 font-medium italic">{t.subject || 'Tất cả'}</p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                               <button 
+                                onClick={() => {
+                                  setData(prev => ({
+                                    ...prev,
+                                    settings: {
+                                      ...prev.settings,
+                                      commentTemplates: prev.settings.commentTemplates?.filter((_, i) => i !== idx)
+                                    }
+                                  }));
+                                }}
+                                className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                                title="Xóa mẫu"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {(!data.settings.commentTemplates || data.settings.commentTemplates.length === 0) && (
+                        <tr>
+                          <td colSpan={5} className="py-20 text-center text-slate-300 italic text-sm">
+                            Danh mục nhận xét hiện đang trống. Hãy thêm mẫu mới hoặc lưu lại từ sổ điểm.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </motion.div>
           )}
