@@ -84,7 +84,9 @@ const stripAiSpecialChars = (text: string) => {
 
 const ALL_COLUMNS = [
   { id: 'code', name: 'Mã HS' },
+  { id: 'name', name: 'Họ và Tên' },
   { id: 'birthday', name: 'Ngày sinh' },
+  { id: 'gender', name: 'Nam/Nữ' },
   { id: 'tx1', name: 'TX1' },
   { id: 'tx2', name: 'TX2' },
   { id: 'tx3', name: 'TX3' },
@@ -137,7 +139,8 @@ const INITIAL_DATA: AppData = {
     modelName: 'gemini-1.5-flash',
     theme: 'light',
     schoolYears: DEFAULT_YEARS,
-    visibleColumns: ['code', 'tx1', 'tx2', 'tx3', 'tx4', 'h1', 'semester', 'bonus', 'penalty', 'net', 'avg', 'rank', 'comment']
+    visibleColumns: ['code', 'name', 'birthday', 'gender', 'tx1', 'tx2', 'tx3', 'tx4', 'h1', 'semester', 'bonus', 'penalty', 'net', 'avg', 'rank', 'comment'],
+    commentTemplates: []
   }
 };
 
@@ -695,6 +698,7 @@ export default function App() {
       { label: '8 <= Điểm <= 8.9', min: 8, max: 8.9 },
       { label: '9 <= Điểm <= 10', min: 9, max: 10 },
     ];
+    const templates = data.settings.commentTemplates || [];
 
     Swal.fire({
       title: 'Thiết lập nhận xét hàng loạt',
@@ -716,9 +720,31 @@ export default function App() {
               </select>
             </div>
           </div>
+          
+          ${templates.length > 0 ? `
+          <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Nhận xét đã lưu (Nhấn để chọn)</p>
+            <div class="max-h-32 overflow-y-auto space-y-1 pr-2">
+              ${templates.map((t, i) => `
+                <button type="button" 
+                  onclick="document.getElementById('bulk-comment').value='${t.comment.replace(/'/g, "\\'")}'; document.getElementById('bulk-range').value='${t.rangeIdx}'" 
+                  class="w-full text-left p-2 text-[11px] hover:bg-white rounded border border-transparent hover:border-slate-200 transition-all flex items-start gap-2 group"
+                >
+                  <span class="font-bold text-blue-600 whitespace-nowrap">${SCORE_RANGES[t.rangeIdx]?.label.split(' <= ')[0] || ''}..</span>
+                  <span class="text-slate-600 truncate">${t.comment}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nội dung nhận xét</label>
             <textarea id="bulk-comment" class="swal2-textarea !m-0 !w-full" placeholder="Nhập nội dung nhận xét..."></textarea>
+            <label class="flex items-center gap-2 mt-2 cursor-pointer group">
+              <input type="checkbox" id="bulk-save-template" class="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+              <span class="text-xs text-slate-600 group-hover:text-blue-600 transition-colors">Lưu vào danh mục nhận xét của tôi</span>
+            </label>
           </div>
         </div>
       `,
@@ -729,14 +755,25 @@ export default function App() {
         const rangeIdx = parseInt((document.getElementById('bulk-range') as HTMLSelectElement).value);
         const target = (document.getElementById('bulk-target') as HTMLSelectElement).value;
         const comment = (document.getElementById('bulk-comment') as HTMLTextAreaElement).value;
+        const saveTemplate = (document.getElementById('bulk-save-template') as HTMLInputElement).checked;
         if (!comment) Swal.showValidationMessage('Vui lòng nhập nội dung nhận xét');
-        return { range: SCORE_RANGES[rangeIdx], target, comment };
+        return { range: SCORE_RANGES[rangeIdx], rangeIdx, target, comment, saveTemplate };
       }
     }).then(result => {
       if (result.isConfirmed) {
-        const { range, target, comment } = result.value;
+        const { range, rangeIdx, target, comment, saveTemplate } = result.value;
+        
         setData(prev => {
           const newGrades = { ...prev.grades };
+          let newSettings = { ...prev.settings };
+
+          // Lưu template nếu được chọn
+          if (saveTemplate) {
+            const existing = newSettings.commentTemplates || [];
+            if (!existing.find(e => e.comment === comment && e.rangeIdx === rangeIdx)) {
+              newSettings.commentTemplates = [...existing, { rangeIdx, comment }];
+            }
+          }
           
           // Xác định các lớp cần áp dụng
           let targetClasses = [selectedClassId];
@@ -767,7 +804,7 @@ export default function App() {
             newGrades[key] = classGrades;
           });
           
-          return { ...prev, grades: newGrades };
+          return { ...prev, grades: newGrades, settings: newSettings };
         });
         Swal.fire('Thành công', 'Đã cập nhật nhận xét thành công!', 'success');
       }
@@ -776,10 +813,10 @@ export default function App() {
 
   const handlePasteToColumn = (colId: string) => {
     Swal.fire({
-      title: `Dán điểm cho cột ${colId.toUpperCase()}`,
+      title: `Dán dữ liệu cho cột ${colId.toUpperCase()}`,
       html: `
-        <p class="text-xs text-slate-500 mb-2">Mỗi điểm một dòng theo đúng thứ tự danh sách lớp.</p>
-        <textarea id="paste-input" class="swal2-textarea !m-0 !w-full !h-48" placeholder="Dán dữ liệu từ Excel..."></textarea>
+        <p class="text-[11px] text-slate-500 mb-2">Mỗi giá trị một dòng theo đúng thứ tự danh sách lớp.</p>
+        <textarea id="paste-input" class="swal2-textarea !m-0 !w-full !h-48 text-sm" placeholder="Dán dữ liệu từ Excel..."></textarea>
       `,
       showCancelButton: true,
       confirmButtonText: 'Thực hiện',
@@ -790,16 +827,31 @@ export default function App() {
     }).then(result => {
       if (result.isConfirmed && result.value) {
         const rows = result.value.split('\n').map(r => r.trim()).filter(r => r !== '');
-        setDraftGrades(prev => {
-          const newDraft = { ...prev };
-          classStudents.forEach((s, idx) => {
-            if (rows[idx]) {
-              newDraft[s.id] = { ...(newDraft[s.id] || {}), [colId]: rows[idx] };
-            }
+        
+        if (['name', 'code', 'birthday', 'gender'].includes(colId)) {
+          setData(prev => {
+            const newStudents = [...(prev.students[selectedClassId] || [])];
+            rows.forEach((val, idx) => {
+              if (newStudents[idx]) {
+                const key = colId === 'name' ? 'name' : (colId === 'code' ? 'code' : (colId === 'birthday' ? 'birthday' : 'gender'));
+                newStudents[idx] = { ...newStudents[idx], [key]: val };
+              }
+            });
+            return { ...prev, students: { ...prev.students, [selectedClassId]: newStudents } };
           });
-          return newDraft;
-        });
-        Swal.fire('Thành công', `Đã nhập nháp ${rows.length} điểm cho cột ${colId.toUpperCase()}. Nhớ nhấn "Lưu điểm" để hoàn tất.`, 'success');
+          Swal.fire('Thành công', `Đã cập nhật thông tin học sinh cho ${rows.length} dòng.`, 'success');
+        } else {
+          setDraftGrades(prev => {
+            const newDraft = { ...prev };
+            classStudents.forEach((s, idx) => {
+              if (rows[idx]) {
+                newDraft[s.id] = { ...(newDraft[s.id] || {}), [colId]: rows[idx] };
+              }
+            });
+            return newDraft;
+          });
+          Swal.fire('Thành công', `Đã nhập nháp ${rows.length} giá trị cho cột ${colId.toUpperCase()}. Nhớ nhấn "Lưu điểm" để hoàn tất.`, 'success');
+        }
       }
     });
   };
@@ -1533,9 +1585,44 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/80 border-b border-slate-200">
-                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Họ và Tên</th>
-                        {(data.settings.visibleColumns || []).includes('code') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Mã HS</th>}
-                        {(data.settings.visibleColumns || []).includes('birthday') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Ngày sinh</th>}
+                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase group">
+                          <div className="flex items-center gap-1">
+                            Họ và Tên
+                            <button onClick={() => handlePasteToColumn('name')} title="Dán danh sách" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                              <Upload size={12} />
+                            </button>
+                          </div>
+                        </th>
+                        {(data.settings.visibleColumns || []).includes('code') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase group">
+                             <div className="flex items-center gap-1">
+                              Mã HS
+                              <button onClick={() => handlePasteToColumn('code')} title="Dán danh sách" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('birthday') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase group">
+                            <div className="flex items-center gap-1">
+                              Ngày sinh
+                              <button onClick={() => handlePasteToColumn('birthday')} title="Dán danh sách" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('gender') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase group">
+                            <div className="flex items-center gap-1">
+                              Nam/Nữ
+                              <button onClick={() => handlePasteToColumn('gender')} title="Dán danh sách" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
                         {(data.settings.visibleColumns || []).includes('tx1') && (
                           <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center group">
                             <div className="flex items-center justify-center gap-1">
@@ -1596,12 +1683,45 @@ export default function App() {
                             </div>
                           </th>
                         )}
-                        {(data.settings.visibleColumns || []).includes('bonus') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30">Cộng (+)</th>}
-                        {(data.settings.visibleColumns || []).includes('penalty') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30">Trừ (-)</th>}
-                        {(data.settings.visibleColumns || []).includes('net') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>}
-                        {(data.settings.visibleColumns || []).includes('avg') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>}
-                        {(data.settings.visibleColumns || []).includes('rank') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Xếp hạng</th>}
-                        {(data.settings.visibleColumns || []).includes('comment') && <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Nhận xét</th>}
+                        {(data.settings.visibleColumns || []).includes('bonus') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-emerald-600 bg-emerald-50/30 group">
+                            <div className="flex items-center justify-center gap-1">
+                              Cộng (+)
+                              <button onClick={() => handlePasteToColumn('bonus')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('penalty') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-rose-600 bg-rose-50/30 group">
+                            <div className="flex items-center justify-center gap-1">
+                              Trừ (-)
+                              <button onClick={() => handlePasteToColumn('penalty')} title="Dán cột điểm" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('net') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-indigo-600 bg-indigo-50/30">Ròng</th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('avg') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center font-bold text-blue-600 bg-blue-50/30">ĐTB</th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('rank') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center text-amber-600">Hạng</th>
+                        )}
+                        {(data.settings.visibleColumns || []).includes('comment') && (
+                          <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase group">
+                            <div className="flex items-center gap-1">
+                              Nhận xét
+                              <button onClick={() => handlePasteToColumn('manualComment')} title="Dán nhận xét" className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400 hover:text-blue-600">
+                                <Upload size={12} />
+                              </button>
+                            </div>
+                          </th>
+                        )}
                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -1688,6 +1808,7 @@ export default function App() {
                             </td>
                             {(data.settings.visibleColumns || []).includes('code') && <td className="px-6 py-4 text-sm text-slate-500 font-mono">{student.code || '-'}</td>}
                             {(data.settings.visibleColumns || []).includes('birthday') && <td className="px-6 py-4 text-sm text-slate-500">{student.birthday || '-'}</td>}
+                            {(data.settings.visibleColumns || []).includes('gender') && <td className="px-6 py-4 text-sm text-slate-500">{student.gender || '-'}</td>}
                             {/* TX1 */}
                             {(data.settings.visibleColumns || []).includes('tx1') && (
                               <td className="px-3 py-4 text-center">
